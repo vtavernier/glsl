@@ -48,7 +48,8 @@ where
 {
   // write as GLSL in an intermediate buffer
   let mut glsl_buffer = String::new();
-  glsl_transpiler::show_translation_unit(&mut glsl_buffer, tu);
+  glsl_transpiler::show_translation_unit(&mut glsl_buffer, tu, glsl_transpiler::FormattingState::default())
+    .map_err(|e| format!("{}", e))?;
 
   // pass the GLSL-formatted string to shaderc
   let mut compiler = shaderc::Compiler::new().unwrap();
@@ -79,7 +80,8 @@ where
 {
   // write as GLSL in an intermediate buffer
   let mut glsl_buffer = String::new();
-  glsl_transpiler::show_translation_unit(&mut glsl_buffer, tu);
+  glsl_transpiler::show_translation_unit(&mut glsl_buffer, tu, glsl_transpiler::FormattingState::default())
+    .map_err(|e| format!("{}", e))?;
 
   // pass the GLSL-formatted string to shaderc
   let mut compiler = shaderc::Compiler::new().unwrap();

@@ -21,3 +21,4 @@ nom = { version = "6", default-features = false, features = ["std"] }
 shaderc = { version = "0.6", optional = true }
 glsl-impl = "6"
 nom_locate = "3"
+lazy_static = "1.4"
