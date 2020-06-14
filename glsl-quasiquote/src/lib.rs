@@ -77,13 +77,12 @@ use crate::tokenize::Tokenize;
 mod quoted;
 mod tokenize;
 
-/// Create a [`TranslationUnit`].
-///
-/// [`TranslationUnit`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.TranslationUnit.html
-#[proc_macro]
-pub fn glsl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+fn glsl_internal<F>(input: proc_macro::TokenStream) -> proc_macro::TokenStream
+where
+  F: Parse + Tokenize + std::fmt::Debug,
+{
   let s = format!("{}", faithful_display(&input));
-  let parsed: Result<syntax::TranslationUnit, _> = Parse::parse(&s);
+  let parsed: Result<F, _> = Parse::parse(&s);
 
   if let Ok(tu) = parsed {
     // create the stream and return it
@@ -94,4 +93,45 @@ pub fn glsl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   } else {
     panic!("GLSL error: {:?}", parsed);
   }
+}
+
+/// Create a [`TranslationUnit`].
+///
+/// [`TranslationUnit`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.TranslationUnit.html
+#[proc_macro]
+pub fn glsl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  glsl_internal::<syntax::TranslationUnit>(input)
+}
+
+/// Create a [`InitDeclaratorList`].
+///
+/// [`InitDeclaratorList`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.InitDeclaratorList.html
+#[proc_macro]
+pub fn glsl_init_declarator(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  glsl_internal::<syntax::InitDeclaratorList>(input)
+}
+
+
+/// Create a [`SimpleStatement`].
+///
+/// [`SimpleStatement`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.SimpleStatement.html
+#[proc_macro]
+pub fn glsl_statement(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  glsl_internal::<syntax::SimpleStatement>(input)
+}
+
+/// Create a [`CompoundStatement`].
+///
+/// [`CompoundStatement`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.CompoundStatement.html
+#[proc_macro]
+pub fn glsl_statements(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  glsl_internal::<syntax::CompoundStatement>(input)
+}
+
+/// Create a [`Expr`].
+///
+/// [`Expr`]: https://docs.rs/glsl/1.0.0/glsl/syntax/struct.Expr.html
+#[proc_macro]
+pub fn glsl_expr(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  glsl_internal::<syntax::Expr>(input)
 }
