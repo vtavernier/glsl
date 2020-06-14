@@ -126,8 +126,21 @@ impl_tokenize!(
 
 fn tokenize_identifier(i: &syntax::Identifier) -> TokenStream {
   let span = tokenize_span(&i.span);
-  let i = i.quote();
-  quote! { glsl::syntax::Identifier::new(#i, #span) }
+  let s = &i.0;
+
+  if s.starts_with("___") {
+    let name = &s[3..s.len()];
+    if name.starts_with("C") {
+      let s = proc_macro2::Ident::new(&name[1..name.len()], proc_macro2::Span::call_site());
+      quote! { #s.clone() }
+    } else {
+      let s = proc_macro2::Ident::new(name, proc_macro2::Span::call_site());
+      quote! { #s }
+    }
+  } else {
+    let i = i.quote();
+    quote! { glsl::syntax::Identifier::new(#i, #span) }
+  }
 }
 
 fn tokenize_path(p: &syntax::Path) -> TokenStream {
@@ -622,8 +635,31 @@ fn tokenize_interpolation_qualifier(i: &syntax::InterpolationQualifier) -> Token
 fn tokenize_expr(expr: &syntax::Expr) -> TokenStream {
   match *expr {
     syntax::Expr::Variable(ref i) => {
-      let i = tokenize_identifier(i);
-      quote! { glsl::syntax::Expr::Variable(#i) }
+      if i.0.starts_with("___") {
+        let name = &i.0[3..i.0.len()];
+        if name.starts_with("C") {
+          let s = proc_macro2::Ident::new(&name[1..name.len()], proc_macro2::Span::call_site());
+          quote! { glsl::syntax::Expr::Variable(#s.clone()) }
+        } else {
+          let s = proc_macro2::Ident::new(name, proc_macro2::Span::call_site());
+          quote! { glsl::syntax::Expr::Variable(#s) }
+        }
+      } else if i.0.starts_with("__") {
+        let name = &i.0[2..i.0.len()];
+        if name.starts_with("C") {
+          let s = proc_macro2::Ident::new(&name[1..name.len()], proc_macro2::Span::call_site());
+          quote! { #s.clone() }
+        } else if name.starts_with("P") {
+          let s = proc_macro2::Ident::new(&name[1..name.len()], proc_macro2::Span::call_site());
+          quote! { glsl::syntax::Expr::parse(#s)? }
+        } else {
+          let s = proc_macro2::Ident::new(name, proc_macro2::Span::call_site());
+          quote! { #s }
+        }
+      } else {
+        let i = tokenize_identifier(i);
+        quote! { glsl::syntax::Expr::Variable(#i) }
+      }
     }
 
     syntax::Expr::IntConst(ref x) => quote! { glsl::syntax::Expr::IntConst(#x) },
@@ -754,8 +790,19 @@ fn tokenize_assignment_op(op: &syntax::AssignmentOp) -> TokenStream {
 fn tokenize_function_identifier(i: &syntax::FunIdentifier) -> TokenStream {
   match *i {
     syntax::FunIdentifier::Identifier(ref n) => {
-      let n = n.quote();
-      quote! { glsl::syntax::FunIdentifier::Identifier(#n) }
+      if n.0.starts_with("__") {
+        let name = &n.0[2..n.0.len()];
+        if name.starts_with("C") {
+          let s = proc_macro2::Ident::new(&name[1..name.len()], proc_macro2::Span::call_site());
+          quote! { glsl::syntax::FunIdentifier::Identifier(#s.clone()) }
+        } else {
+          let s = proc_macro2::Ident::new(name, proc_macro2::Span::call_site());
+          quote! { glsl::syntax::FunIdentifier::Identifier(#s) }
+        }
+      } else {
+        let n = tokenize_identifier(n);
+        quote! { glsl::syntax::FunIdentifier::Identifier(#n) }
+      }
     }
 
     syntax::FunIdentifier::Expr(ref e) => {

@@ -4,7 +4,7 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 
-use glsl::syntax::{Identifier, TypeName};
+use glsl::syntax::{IdentifierData, TypeName};
 
 // Quoted type.
 pub trait Quoted {
@@ -39,7 +39,7 @@ where
   }
 }
 
-impl Quoted for Identifier {
+impl Quoted for IdentifierData {
   fn quote(&self) -> TokenStream {
     let s = &self.0;
     quote! { glsl::syntax::IdentifierData(#s.to_owned()) }
