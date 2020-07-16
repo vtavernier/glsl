@@ -1580,7 +1580,7 @@ mod tests {
 
   #[test]
   fn roundtrip_glsl_complex_expr() {
-    use crate::parsers::expr;
+    use crate::parser::Parse;
 
     let zero = syntax::Expr::DoubleConst(0.);
     let ray = syntax::Expr::Variable("ray".into());
@@ -1605,8 +1605,8 @@ mod tests {
     show_expr(&mut output, &input);
     let _ = output.write_str(";");
 
-    let back = expr(&output);
+    let back = syntax::Expr::parse(&output);
 
-    assert_eq!(back, Ok((";", input)), "intermediate source '{}'", output);
+    assert_eq!(back, Ok(input), "intermediate source '{}'", output);
   }
 }

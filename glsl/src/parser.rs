@@ -14,6 +14,8 @@ use nom::error::convert_error;
 use nom::Err as NomErr;
 use std::fmt;
 
+use nom_locate::LocatedSpan;
+
 use crate::parsers::ParserResult;
 use crate::syntax;
 
@@ -34,8 +36,10 @@ impl fmt::Display for ParseError {
 /// Run a parser `P` on a given `[&str`] input.
 pub(crate) fn run_parser<P, T>(source: &str, parser: P) -> Result<T, ParseError>
 where
-  P: FnOnce(&str) -> ParserResult<T>,
+  P: FnOnce(LocatedSpan<&str>) -> ParserResult<T>,
 {
+  let source = LocatedSpan::new(source);
+
   match parser(source) {
     Ok((_, x)) => Ok(x),
 
@@ -45,7 +49,16 @@ where
       }),
 
       NomErr::Error(err) | NomErr::Failure(err) => {
-        let info = convert_error(source, err);
+        let info = convert_error(
+          source.fragment(),
+          nom::error::VerboseError {
+            errors: err
+              .errors
+              .into_iter()
+              .map(|(i, k)| (*i.fragment(), k))
+              .collect(),
+          },
+        );
         Err(ParseError { info })
       }
     },
