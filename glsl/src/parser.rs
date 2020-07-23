@@ -89,6 +89,19 @@ macro_rules! impl_parse {
       }
     }
   };
+
+  ($type_name:ty, $parser_name:ident => $field:tt) => {
+    impl Parse for $type_name {
+      fn parse<B>(source: B) -> Result<Self, ParseError>
+      where
+        B: AsRef<str>,
+      {
+        run_parser(source.as_ref(), |s| {
+          $crate::parsers::$parser_name(s).map(|(i, r)| (i, r.$field))
+        })
+      }
+    }
+  };
 }
 
 impl_parse!(syntax::Identifier, identifier);
@@ -106,7 +119,7 @@ impl_parse!(syntax::TypeQualifierSpec, type_qualifier_spec);
 impl_parse!(syntax::FullySpecifiedType, fully_specified_type);
 impl_parse!(syntax::ArraySpecifier, array_specifier);
 impl_parse!(syntax::Expr, expr);
-impl_parse!(syntax::Declaration, declaration);
+impl_parse!(syntax::Declaration, declaration => contents);
 impl_parse!(syntax::FunctionPrototype, function_prototype);
 impl_parse!(syntax::InitDeclaratorList, init_declarator_list);
 impl_parse!(syntax::SingleDeclaration, single_declaration);
@@ -123,10 +136,10 @@ impl_parse!(syntax::JumpStatement, jump_statement);
 impl_parse!(syntax::Condition, condition);
 impl_parse!(syntax::Statement, statement);
 impl_parse!(syntax::CompoundStatement, compound_statement);
-impl_parse!(syntax::FunctionDefinition, function_definition);
-impl_parse!(syntax::ExternalDeclaration, external_declaration);
+impl_parse!(syntax::FunctionDefinition, function_definition => contents);
+impl_parse!(syntax::ExternalDeclaration, external_declaration => contents);
 impl_parse!(syntax::TranslationUnit, translation_unit);
-impl_parse!(syntax::Preprocessor, preprocessor);
+impl_parse!(syntax::Preprocessor, preprocessor => contents);
 impl_parse!(syntax::PreprocessorVersion, pp_version);
 impl_parse!(syntax::PreprocessorVersionProfile, pp_version_profile);
 impl_parse!(syntax::PreprocessorExtensionName, pp_extension_name);

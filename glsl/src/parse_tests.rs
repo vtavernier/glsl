@@ -22,6 +22,25 @@ fn assert_eq_parser<R: PartialEq + std::fmt::Debug>(
   );
 }
 
+fn assert_eq_parser_1<R: PartialEq + std::fmt::Debug + Clone>(
+  parser: impl Fn(LocatedSpan<&str>) -> ParserResult<syntax::Node<R>>,
+  input: &str,
+  output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
+) {
+  assert_eq!(
+    parser(LocatedSpan::new(input))
+      .map(|(a, b)| (*a.fragment(), b.contents))
+      .map_err(|e| e.map(|e| nom::error::VerboseError {
+        errors: e
+          .errors
+          .into_iter()
+          .map(|(i, k)| (*i.fragment(), k))
+          .collect()
+      })),
+    output
+  );
+}
+
 fn assert_eq_parser_str(
   parser: impl Fn(LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>>,
   input: &str,
@@ -1983,17 +2002,17 @@ fn parse_declaration_function_prototype() {
   };
   let expected = syntax::Declaration::FunctionPrototype(fp);
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "vec3 foo(vec2, out float the_arg);",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "vec3 \nfoo ( vec2\n, out float \n\tthe_arg )\n;",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "vec3 foo(vec2,out float the_arg);",
     Ok(("", expected)),
@@ -2023,9 +2042,9 @@ fn parse_declaration_init_declarator_list_single() {
   };
   let expected = syntax::Declaration::InitDeclaratorList(idl);
 
-  assert_eq_parser(declaration, "int foo = 34;", Ok(("", expected.clone())));
-  assert_eq_parser(declaration, "int foo=34;", Ok(("", expected.clone())));
-  assert_eq_parser(declaration, "int    \t  \nfoo =\t34  ;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "int foo = 34;", Ok(("", expected.clone())));
+  assert_eq_parser_1(declaration, "int foo=34;", Ok(("", expected.clone())));
+  assert_eq_parser_1(declaration, "int    \t  \nfoo =\t34  ;", Ok(("", expected)));
 }
 
 #[test]
@@ -2056,17 +2075,17 @@ fn parse_declaration_init_declarator_list_complex() {
     tail: vec![sdnt],
   });
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "int foo = 34, bar = 12;",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "int foo=34,bar=12;",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "int    \t  \nfoo =\t34 \n,\tbar=      12\n ;",
     Ok(("", expected)),
@@ -2082,7 +2101,7 @@ fn parse_declaration_precision_low() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser(declaration, "precision lowp float;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "precision lowp float;", Ok(("", expected)));
 }
 
 #[test]
@@ -2094,7 +2113,7 @@ fn parse_declaration_precision_medium() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser(declaration, "precision mediump float;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "precision mediump float;", Ok(("", expected)));
 }
 
 #[test]
@@ -2106,7 +2125,7 @@ fn parse_declaration_precision_high() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser(declaration, "precision highp float;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "precision highp float;", Ok(("", expected)));
 }
 
 #[test]
@@ -2146,12 +2165,12 @@ fn parse_declaration_uniform_block() {
     identifier: None,
   });
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "uniform UniformBlockTest { float a; vec3 b; foo c, d; };",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(declaration, "uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
 }
 
 #[test]
@@ -2196,12 +2215,12 @@ fn parse_declaration_buffer_block() {
     identifier: None,
   });
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     declaration,
     "buffer UniformBlockTest { float a; vec3 b[]; foo c, d; };",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(declaration, "buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
 }
 
 #[test]
@@ -2578,17 +2597,17 @@ fn parse_function_definition() {
     },
   };
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     function_definition,
     "iimage2DArray foo() { return bar; }",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     function_definition,
     "iimage2DArray \tfoo\n()\n \n{\n return \nbar\n;}",
     Ok(("", expected.clone())),
   );
-  assert_eq_parser(
+  assert_eq_parser_1(
     function_definition,
     "iimage2DArray foo(){return bar;}",
     Ok(("", expected)),
@@ -2598,24 +2617,32 @@ fn parse_function_definition() {
 #[test]
 fn parse_buffer_block_0() {
   let src = include_str!("../data/tests/buffer_block_0.glsl");
-  let main_fn = syntax::ExternalDeclaration::FunctionDefinition(syntax::FunctionDefinition {
-    prototype: syntax::FunctionPrototype {
-      ty: syntax::FullySpecifiedType {
-        qualifier: None,
-        ty: syntax::TypeSpecifier {
-          ty: syntax::TypeSpecifierNonArray::Void,
-          array_specifier: None,
+  let main_fn = syntax::Node {
+    contents: syntax::ExternalDeclaration::FunctionDefinition(syntax::FunctionDefinition {
+      prototype: syntax::FunctionPrototype {
+        ty: syntax::FullySpecifiedType {
+          qualifier: None,
+          ty: syntax::TypeSpecifier {
+            ty: syntax::TypeSpecifierNonArray::Void,
+            array_specifier: None,
+          },
         },
+        name: "main".into(),
+        parameters: Vec::new(),
       },
-      name: "main".into(),
-      parameters: Vec::new(),
+      statement: syntax::CompoundStatement {
+        statement_list: Vec::new(),
+      },
+    }),
+    span: syntax::NodeSpan {
+      offset: 46,
+      line: 5,
+      length: 15,
     },
-    statement: syntax::CompoundStatement {
-      statement_list: Vec::new(),
-    },
-  });
-  let buffer_block =
-    syntax::ExternalDeclaration::Declaration(syntax::Declaration::Block(syntax::Block {
+  };
+
+  let buffer_block = syntax::Node {
+    contents: syntax::ExternalDeclaration::Declaration(syntax::Declaration::Block(syntax::Block {
       qualifier: syntax::TypeQualifier {
         qualifiers: syntax::NonEmpty(vec![syntax::TypeQualifierSpec::Storage(
           syntax::StorageQualifier::Buffer,
@@ -2636,7 +2663,14 @@ fn parse_buffer_block_0() {
         )]),
       }],
       identifier: Some("main_tiles".into()),
-    }));
+    })),
+    span: syntax::NodeSpan {
+      offset: 0,
+      line: 1,
+      length: 44,
+    },
+  };
+
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![buffer_block, main_fn]));
 
   assert_eq_parser(translation_unit, src, Ok(("", expected)));
@@ -2663,19 +2697,26 @@ fn parse_layout_buffer_block_0() {
       syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Buffer),
     ]),
   };
-  let block = syntax::ExternalDeclaration::Declaration(syntax::Declaration::Block(syntax::Block {
-    qualifier: type_qual,
-    name: "Foo".into(),
-    fields: vec![syntax::StructFieldSpecifier {
-      qualifier: None,
-      ty: syntax::TypeSpecifier {
-        ty: syntax::TypeSpecifierNonArray::TypeName("char".into()),
-        array_specifier: None,
-      },
-      identifiers: syntax::NonEmpty(vec!["a".into()]),
-    }],
-    identifier: Some("foo".into()),
-  }));
+  let block = syntax::Node {
+    contents: syntax::ExternalDeclaration::Declaration(syntax::Declaration::Block(syntax::Block {
+      qualifier: type_qual,
+      name: "Foo".into(),
+      fields: vec![syntax::StructFieldSpecifier {
+        qualifier: None,
+        ty: syntax::TypeSpecifier {
+          ty: syntax::TypeSpecifierNonArray::TypeName("char".into()),
+          array_specifier: None,
+        },
+        identifiers: syntax::NonEmpty(vec!["a".into()]),
+      }],
+      identifier: Some("foo".into()),
+    })),
+    span: syntax::NodeSpan {
+      offset: 0,
+      line: 1,
+      length: src.len() - 1, // Final newline
+    },
+  };
 
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![block]));
 
@@ -2714,7 +2755,7 @@ fn parse_pp_version_profile() {
 
 #[test]
 fn parse_pp_version() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#version 450\n",
     Ok((
@@ -2726,7 +2767,7 @@ fn parse_pp_version() {
     )),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#version 450 core\n",
     Ok((
@@ -2741,7 +2782,7 @@ fn parse_pp_version() {
 
 #[test]
 fn parse_pp_version_newline() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#version 450\n",
     Ok((
@@ -2753,7 +2794,7 @@ fn parse_pp_version_newline() {
     )),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#version 450 core\n",
     Ok((
@@ -2778,11 +2819,11 @@ fn parse_pp_define() {
     ))
   };
 
-  assert_eq_parser(preprocessor, "#define test 1.0", expect("1.0"));
-  assert_eq_parser(preprocessor, "#define test \\\n   1.0", expect("1.0"));
-  assert_eq_parser(preprocessor, "#define test 1.0\n", expect("1.0"));
+  assert_eq_parser_1(preprocessor, "#define test 1.0", expect("1.0"));
+  assert_eq_parser_1(preprocessor, "#define test \\\n   1.0", expect("1.0"));
+  assert_eq_parser_1(preprocessor, "#define test 1.0\n", expect("1.0"));
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#define test123 .0f\n",
     Ok((
@@ -2794,7 +2835,7 @@ fn parse_pp_define() {
     )),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#define test 1\n",
     Ok((
@@ -2818,13 +2859,13 @@ fn parse_pp_define_with_args() {
     value: "(x + y)".to_owned(),
   });
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#define \\\n add(x, y) \\\n (x + y)",
     Ok(("", expected.clone())),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#define \\\n add(  x, y  ) \\\n (x + y)",
     Ok(("", expected)),
@@ -2833,7 +2874,7 @@ fn parse_pp_define_with_args() {
 
 #[test]
 fn parse_pp_define_multiline() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     r#"#define foo \
        32"#,
@@ -2849,7 +2890,7 @@ fn parse_pp_define_multiline() {
 
 #[test]
 fn parse_pp_else() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#    else\n",
     Ok(("", syntax::Preprocessor::Else)),
@@ -2858,7 +2899,7 @@ fn parse_pp_else() {
 
 #[test]
 fn parse_pp_elseif() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#   elseif \\\n42\n",
     Ok((
@@ -2872,7 +2913,7 @@ fn parse_pp_elseif() {
 
 #[test]
 fn parse_pp_endif() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#\\\nendif",
     Ok(("", syntax::Preprocessor::EndIf)),
@@ -2881,7 +2922,7 @@ fn parse_pp_endif() {
 
 #[test]
 fn parse_pp_error() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#error \\\n     some message",
     Ok((
@@ -2895,7 +2936,7 @@ fn parse_pp_error() {
 
 #[test]
 fn parse_pp_if() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "# \\\nif 42",
     Ok((
@@ -2909,7 +2950,7 @@ fn parse_pp_if() {
 
 #[test]
 fn parse_pp_ifdef() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#ifdef       FOO\n",
     Ok((
@@ -2923,7 +2964,7 @@ fn parse_pp_ifdef() {
 
 #[test]
 fn parse_pp_ifndef() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#\\\nifndef \\\n   FOO\n",
     Ok((
@@ -2937,7 +2978,7 @@ fn parse_pp_ifndef() {
 
 #[test]
 fn parse_pp_include() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#include <filename>\n",
     Ok((
@@ -2948,7 +2989,7 @@ fn parse_pp_include() {
     )),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#include \\\n\"filename\"\n",
     Ok((
@@ -2962,7 +3003,7 @@ fn parse_pp_include() {
 
 #[test]
 fn parse_pp_line() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#   line \\\n2\n",
     Ok((
@@ -2974,7 +3015,7 @@ fn parse_pp_line() {
     )),
   );
 
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#line 2 \\\n 4\n",
     Ok((
@@ -2989,7 +3030,7 @@ fn parse_pp_line() {
 
 #[test]
 fn parse_pp_pragma() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#\\\npragma  some   flag",
     Ok((
@@ -3003,7 +3044,7 @@ fn parse_pp_pragma() {
 
 #[test]
 fn parse_pp_undef() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "# undef \\\n FOO",
     Ok((
@@ -3058,7 +3099,7 @@ fn parse_pp_extension_behavior() {
 
 #[test]
 fn parse_pp_extension() {
-  assert_eq_parser(
+  assert_eq_parser_1(
     preprocessor,
     "#extension all: require\n",
     Ok((

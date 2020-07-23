@@ -22,6 +22,72 @@ use std::fmt;
 use std::iter::{once, FromIterator};
 use std::ops::{Deref, DerefMut};
 
+/// Span information for a node, constructed from a nom_locate::LocatedSpan
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NodeSpan {
+  /// The offset represents the position of the fragment relatively to
+  /// the input of the parser. It starts at offset 0.
+  pub offset: usize,
+
+  /// The line number of the fragment relatively to the input of the
+  /// parser. It starts at line 1.
+  pub line: u32,
+
+  /// The length of the span represented by this structure
+  pub length: usize,
+}
+
+impl std::convert::From<nom_locate::LocatedSpan<&'_ str>> for NodeSpan {
+  fn from(span: nom_locate::LocatedSpan<&'_ str>) -> Self {
+    Self {
+      offset: span.location_offset(),
+      line: span.location_line(),
+      length: span.fragment().len(),
+    }
+  }
+}
+
+/// A syntax node with span information
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node<T: std::fmt::Debug + Clone + PartialEq> {
+  pub contents: T,
+  pub span: NodeSpan,
+}
+
+impl<T: std::fmt::Debug + Clone + PartialEq> Node<T> {
+  /// Create a new syntax node with span information
+  pub fn new(contents: T, span: NodeSpan) -> Self {
+    Self { contents, span }
+  }
+
+  /// Return the wrapped syntax node, discarding the span information
+  pub fn into_inner(self) -> T {
+    self.contents
+  }
+
+  /// Map this contents of this node into a new node
+  pub fn map<U: std::fmt::Debug + Clone + PartialEq>(self, f: impl FnOnce(T) -> U) -> Node<U> {
+    Node {
+      contents: f(self.contents),
+      span: self.span,
+    }
+  }
+}
+
+impl<T: std::fmt::Debug + Clone + PartialEq> std::ops::Deref for Node<T> {
+  type Target = T;
+
+  fn deref(&self) -> &Self::Target {
+    &self.contents
+  }
+}
+
+impl<T: std::fmt::Debug + Clone + PartialEq> std::ops::DerefMut for Node<T> {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.contents
+  }
+}
+
 /// A non-empty [`Vec`]. It has at least one element.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NonEmpty<T>(pub Vec<T>);
@@ -808,7 +874,7 @@ pub enum AssignmentOp {
 
 /// Starting rule.
 #[derive(Clone, Debug, PartialEq)]
-pub struct TranslationUnit(pub NonEmpty<ExternalDeclaration>);
+pub struct TranslationUnit(pub NonEmpty<Node<ExternalDeclaration>>);
 
 /// A shader stage.
 pub type ShaderStage = TranslationUnit;
@@ -822,14 +888,14 @@ impl TranslationUnit {
   /// `None` if the iterator yields no value.
   pub fn from_non_empty_iter<I>(iter: I) -> Option<Self>
   where
-    I: IntoIterator<Item = ExternalDeclaration>,
+    I: IntoIterator<Item = Node<ExternalDeclaration>>,
   {
     NonEmpty::from_non_empty_iter(iter).map(TranslationUnit)
   }
 }
 
 impl Deref for TranslationUnit {
-  type Target = NonEmpty<ExternalDeclaration>;
+  type Target = NonEmpty<Node<ExternalDeclaration>>;
 
   fn deref(&self) -> &Self::Target {
     &self.0
@@ -843,8 +909,8 @@ impl DerefMut for TranslationUnit {
 }
 
 impl IntoIterator for TranslationUnit {
-  type IntoIter = <NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
-  type Item = ExternalDeclaration;
+  type IntoIter = <NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
+  type Item = Node<ExternalDeclaration>;
 
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_iter()
@@ -852,8 +918,8 @@ impl IntoIterator for TranslationUnit {
 }
 
 impl<'a> IntoIterator for &'a TranslationUnit {
-  type IntoIter = <&'a NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
-  type Item = &'a ExternalDeclaration;
+  type IntoIter = <&'a NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
+  type Item = &'a Node<ExternalDeclaration>;
 
   fn into_iter(self) -> Self::IntoIter {
     (&self.0).into_iter()
@@ -861,8 +927,8 @@ impl<'a> IntoIterator for &'a TranslationUnit {
 }
 
 impl<'a> IntoIterator for &'a mut TranslationUnit {
-  type IntoIter = <&'a mut NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
-  type Item = &'a mut ExternalDeclaration;
+  type IntoIter = <&'a mut NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
+  type Item = &'a mut Node<ExternalDeclaration>;
 
   fn into_iter(self) -> Self::IntoIter {
     (&mut self.0).into_iter()

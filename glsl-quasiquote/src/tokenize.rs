@@ -93,7 +93,10 @@ impl_tokenize!(syntax::Condition, tokenize_condition);
 impl_tokenize!(syntax::Statement, tokenize_statement);
 impl_tokenize!(syntax::CompoundStatement, tokenize_compound_statement);
 impl_tokenize!(syntax::FunctionDefinition, tokenize_function_definition);
-impl_tokenize!(syntax::ExternalDeclaration, tokenize_external_declaration);
+impl_tokenize!(
+  syntax::Node<syntax::ExternalDeclaration>,
+  tokenize_external_declaration
+);
 impl_tokenize!(syntax::TranslationUnit, tokenize_translation_unit);
 impl_tokenize!(syntax::Preprocessor, tokenize_preprocessor);
 impl_tokenize!(syntax::PreprocessorDefine, tokenize_preprocessor_define);
@@ -1411,8 +1414,18 @@ fn tokenize_preprocessor_extension_behavior(
   }
 }
 
-fn tokenize_external_declaration(ed: &syntax::ExternalDeclaration) -> TokenStream {
-  match *ed {
+fn tokenize_span(s: &syntax::NodeSpan) -> TokenStream {
+  let syntax::NodeSpan {
+    offset,
+    line,
+    length,
+  } = s;
+
+  quote! { glsl::syntax::NodeSpan { offset: #offset, line: #line, length: #length } }
+}
+
+fn tokenize_external_declaration(ed: &syntax::Node<syntax::ExternalDeclaration>) -> TokenStream {
+  let contents = match ed.contents {
     syntax::ExternalDeclaration::Preprocessor(ref pp) => {
       let pp = tokenize_preprocessor(pp);
       quote! { glsl::syntax::ExternalDeclaration::Preprocessor(#pp) }
@@ -1427,10 +1440,14 @@ fn tokenize_external_declaration(ed: &syntax::ExternalDeclaration) -> TokenStrea
       let d = tokenize_declaration(d);
       quote! { glsl::syntax::ExternalDeclaration::Declaration(#d) }
     }
-  }
+  };
+
+  let span = tokenize_span(&ed.span);
+
+  quote! { glsl::syntax::Node::new(#contents, #span) }
 }
 
 fn tokenize_translation_unit(tu: &syntax::TranslationUnit) -> TokenStream {
-  let tu = (tu.0).0.iter().map(tokenize_external_declaration);
+  let tu = (tu.0).0.iter().map(|d| tokenize_external_declaration(&d));
   quote! { glsl::syntax::TranslationUnit(glsl::syntax::NonEmpty(vec![#(#tu),*])) }
 }

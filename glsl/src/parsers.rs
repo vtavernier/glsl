@@ -18,12 +18,34 @@ use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple
 use nom::{Err as NomErr, ParseTo};
 use std::num::ParseIntError;
 
-use nom::AsBytes;
+use nom::{AsBytes, Slice};
 use nom_locate::{position, LocatedSpan};
 
 pub use self::nom_helpers::ParserResult;
 use self::nom_helpers::{blank_space, cnst, eol, many0_, str_till_eol};
 use crate::syntax;
+
+macro_rules! parse_located {
+  ($i:ident, $b:block) => {{
+    let s = $i;
+
+    // Record start position of declaration
+    let ($i, start) = position($i)?;
+
+    let ($i, res) = $b?;
+
+    let ($i, end) = position($i)?;
+
+    Ok((
+      $i,
+      syntax::Node::new(
+        res,
+        s.slice(0..(end.location_offset() - start.location_offset()))
+          .into(),
+      ),
+    ))
+  }};
+}
 
 // Parse a keyword. A keyword is just a regular string that must be followed by punctuation.
 fn keyword<'a>(
@@ -798,20 +820,22 @@ pub fn dot_field_selection(i: LocatedSpan<&str>) -> ParserResult<syntax::Identif
 }
 
 /// Parse a declaration.
-pub fn declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declaration> {
-  alt((
-    map(
-      terminated(function_prototype, terminated(blank, char(';'))),
-      syntax::Declaration::FunctionPrototype,
-    ),
-    map(
-      terminated(init_declarator_list, terminated(blank, char(';'))),
-      syntax::Declaration::InitDeclaratorList,
-    ),
-    precision_declaration,
-    block_declaration,
-    global_declaration,
-  ))(i)
+pub fn declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::Declaration>> {
+  parse_located!(i, {
+    alt((
+      map(
+        terminated(function_prototype, terminated(blank, char(';'))),
+        syntax::Declaration::FunctionPrototype,
+      ),
+      map(
+        terminated(init_declarator_list, terminated(blank, char(';'))),
+        syntax::Declaration::InitDeclaratorList,
+      ),
+      precision_declaration,
+      block_declaration,
+      global_declaration,
+    ))(i)
+  })
 }
 
 /// Parse a precision declaration.
@@ -1335,7 +1359,9 @@ pub fn simple_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SimpleStat
     map(case_label, syntax::SimpleStatement::CaseLabel),
     map(switch_statement, syntax::SimpleStatement::Switch),
     map(selection_statement, syntax::SimpleStatement::Selection),
-    map(declaration, syntax::SimpleStatement::Declaration),
+    map(declaration, |d| {
+      syntax::SimpleStatement::Declaration(d.into_inner())
+    }),
     map(expr_statement, syntax::SimpleStatement::Expression),
   ))(i)
 }
@@ -1474,7 +1500,7 @@ fn iteration_statement_for_init_statement(
   alt((
     map(expr_statement, syntax::ForInitStatement::Expression),
     map(declaration, |d| {
-      syntax::ForInitStatement::Declaration(Box::new(d))
+      syntax::ForInitStatement::Declaration(Box::new(d.into_inner()))
     }),
   ))(i)
 }
@@ -1584,30 +1610,42 @@ pub fn compound_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Compound
 }
 
 /// Parse a function definition.
-pub fn function_definition(i: LocatedSpan<&str>) -> ParserResult<syntax::FunctionDefinition> {
-  map(
-    pair(terminated(function_prototype, blank), compound_statement),
-    |(prototype, statement)| syntax::FunctionDefinition {
-      prototype,
-      statement,
-    },
-  )(i)
+pub fn function_definition(
+  i: LocatedSpan<&str>,
+) -> ParserResult<syntax::Node<syntax::FunctionDefinition>> {
+  parse_located!(i, {
+    map(
+      pair(terminated(function_prototype, blank), compound_statement),
+      |(prototype, statement)| syntax::FunctionDefinition {
+        prototype,
+        statement,
+      },
+    )(i)
+  })
 }
 
 /// Parse an external declaration.
-pub fn external_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::ExternalDeclaration> {
-  alt((
-    map(preprocessor, syntax::ExternalDeclaration::Preprocessor),
-    map(
-      function_definition,
-      syntax::ExternalDeclaration::FunctionDefinition,
-    ),
-    map(declaration, syntax::ExternalDeclaration::Declaration),
-    preceded(
-      delimited(blank, char(';'), blank),
-      cut(external_declaration),
-    ),
-  ))(i)
+pub fn external_declaration(
+  i: LocatedSpan<&str>,
+) -> ParserResult<syntax::Node<syntax::ExternalDeclaration>> {
+  parse_located!(i, {
+    alt((
+      map(preprocessor, |n| {
+        n.map(|c| syntax::ExternalDeclaration::Preprocessor(c))
+      }),
+      map(function_definition, |n| {
+        n.map(|c| syntax::ExternalDeclaration::FunctionDefinition(c))
+      }),
+      map(declaration, |n| {
+        n.map(|c| syntax::ExternalDeclaration::Declaration(c))
+      }),
+      preceded(
+        delimited(blank, char(';'), blank),
+        cut(external_declaration),
+      ),
+    ))(i)
+  })
+  .map(|(i, r)| (i, r.into_inner()))
 }
 
 /// Parse a translation unit (entry point).
@@ -1619,26 +1657,28 @@ pub fn translation_unit(i: LocatedSpan<&str>) -> ParserResult<syntax::Translatio
 }
 
 /// Parse a preprocessor directive.
-pub fn preprocessor(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocessor> {
-  preceded(
-    terminated(char('#'), pp_space0),
-    cut(alt((
-      map(pp_define, syntax::Preprocessor::Define),
-      value(syntax::Preprocessor::Else, pp_else),
-      map(pp_elseif, syntax::Preprocessor::ElseIf),
-      value(syntax::Preprocessor::EndIf, pp_endif),
-      map(pp_error, syntax::Preprocessor::Error),
-      map(pp_if, syntax::Preprocessor::If),
-      map(pp_ifdef, syntax::Preprocessor::IfDef),
-      map(pp_ifndef, syntax::Preprocessor::IfNDef),
-      map(pp_include, syntax::Preprocessor::Include),
-      map(pp_line, syntax::Preprocessor::Line),
-      map(pp_pragma, syntax::Preprocessor::Pragma),
-      map(pp_undef, syntax::Preprocessor::Undef),
-      map(pp_version, syntax::Preprocessor::Version),
-      map(pp_extension, syntax::Preprocessor::Extension),
-    ))),
-  )(i)
+pub fn preprocessor(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::Preprocessor>> {
+  parse_located!(i, {
+    preceded(
+      terminated(char('#'), pp_space0),
+      cut(alt((
+        map(pp_define, syntax::Preprocessor::Define),
+        value(syntax::Preprocessor::Else, pp_else),
+        map(pp_elseif, syntax::Preprocessor::ElseIf),
+        value(syntax::Preprocessor::EndIf, pp_endif),
+        map(pp_error, syntax::Preprocessor::Error),
+        map(pp_if, syntax::Preprocessor::If),
+        map(pp_ifdef, syntax::Preprocessor::IfDef),
+        map(pp_ifndef, syntax::Preprocessor::IfNDef),
+        map(pp_include, syntax::Preprocessor::Include),
+        map(pp_line, syntax::Preprocessor::Line),
+        map(pp_pragma, syntax::Preprocessor::Pragma),
+        map(pp_undef, syntax::Preprocessor::Undef),
+        map(pp_version, syntax::Preprocessor::Version),
+        map(pp_extension, syntax::Preprocessor::Extension),
+      ))),
+    )(i)
+  })
 }
 
 /// Parse a preprocessor version number.

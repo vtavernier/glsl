@@ -10,17 +10,17 @@ fn left_associativity() {
   ]
   .iter()
   {
-    let r = syntax::TranslationUnit::parse(format!(
-      "
-      void main() {{
+    let s = format!(
+      "void main() {{
         x = a {op} b {op} c;
-      }}
-    ",
+      }}",
       op = opstr
-    ));
+    );
 
-    let expected = syntax::TranslationUnit::from_non_empty_iter(vec![
-      syntax::ExternalDeclaration::FunctionDefinition(syntax::FunctionDefinition {
+    let r = syntax::TranslationUnit::parse(&s);
+
+    let expected = syntax::TranslationUnit::from_non_empty_iter(vec![syntax::Node {
+      contents: syntax::ExternalDeclaration::FunctionDefinition(syntax::FunctionDefinition {
         prototype: syntax::FunctionPrototype {
           ty: syntax::FullySpecifiedType {
             qualifier: None,
@@ -50,7 +50,12 @@ fn left_associativity() {
           ))],
         },
       }),
-    ])
+      span: syntax::NodeSpan {
+        offset: 0,
+        line: 1,
+        length: s.len(),
+      },
+    }])
     .unwrap();
 
     assert_eq!(r, Ok(expected));
