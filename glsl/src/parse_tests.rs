@@ -1,59 +1,60 @@
 use crate::parsers::*;
 use crate::syntax;
 
-use nom_locate::LocatedSpan;
-
-fn assert_eq_parser<R: PartialEq + std::fmt::Debug>(
-  parser: impl Fn(LocatedSpan<&str>) -> ParserResult<R>,
-  input: &str,
+fn assert_eq_parser<'d, 'c: 'd, R: PartialEq + std::fmt::Debug>(
+  parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, R>,
+  input: &'c str,
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
+  ctx: &'d ParseContext<'c>,
 ) {
   assert_eq!(
-    parser(LocatedSpan::new(input))
-      .map(|(a, b)| (*a.fragment(), b))
+    parser(ParseInput::new(input, &ctx))
+      .map(|(a, b)| (a.fragment(), b))
       .map_err(|e| e.map(|e| nom::error::VerboseError {
         errors: e
           .errors
           .into_iter()
-          .map(|(i, k)| (*i.fragment(), k))
+          .map(|(i, k)| (i.fragment(), k))
           .collect()
       })),
     output
   );
 }
 
-fn assert_eq_parser_1<R: PartialEq + std::fmt::Debug + Clone>(
-  parser: impl Fn(LocatedSpan<&str>) -> ParserResult<syntax::Node<R>>,
-  input: &str,
+fn assert_eq_parser_1<'d, 'c: 'd, R: PartialEq + std::fmt::Debug + Clone>(
+  parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Node<R>>,
+  input: &'c str,
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
+  ctx: &'d ParseContext<'c>,
 ) {
   assert_eq!(
-    parser(LocatedSpan::new(input))
-      .map(|(a, b)| (*a.fragment(), b.contents))
+    parser(ParseInput::new(input, &ctx))
+      .map(|(a, b)| (a.fragment(), b.contents))
       .map_err(|e| e.map(|e| nom::error::VerboseError {
         errors: e
           .errors
           .into_iter()
-          .map(|(i, k)| (*i.fragment(), k))
+          .map(|(i, k)| (i.fragment(), k))
           .collect()
       })),
     output
   );
 }
 
-fn assert_eq_parser_str(
-  parser: impl Fn(LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>>,
-  input: &str,
+fn assert_eq_parser_str<'d, 'c: 'd>(
+  parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>>,
+  input: &'c str,
   output: nom::IResult<&str, &str, nom::error::VerboseError<&str>>,
+  ctx: &'d ParseContext<'c>,
 ) {
   assert_eq!(
-    parser(LocatedSpan::new(input))
-      .map(|(a, b)| (*a.fragment(), *b.fragment()))
+    parser(ParseInput::new(input, &ctx))
+      .map(|(a, b)| (a.fragment(), b.fragment()))
       .map_err(|e| e.map(|e| nom::error::VerboseError {
         errors: e
           .errors
           .into_iter()
-          .map(|(i, k)| (*i.fragment(), k))
+          .map(|(i, k)| (i.fragment(), k))
           .collect()
       })),
     output
@@ -62,260 +63,343 @@ fn assert_eq_parser_str(
 
 #[test]
 fn parse_uniline_comment() {
-  assert_eq_parser_str(comment, "// lol", Ok(("", " lol")));
-  assert_eq_parser_str(comment, "// lol\nfoo", Ok(("foo", " lol")));
-  assert_eq_parser_str(comment, "// lol\\\nfoo", Ok(("", " lol\\\nfoo")));
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser_str(comment, "// lol", Ok(("", " lol")), &ctx);
+  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol");
+
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser_str(comment, "// lol\nfoo", Ok(("foo", " lol")), &ctx);
+  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol");
+
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser_str(comment, "// lol\\\nfoo", Ok(("", " lol\\\nfoo")), &ctx);
+  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol\\\nfoo");
+
+  let ctx = ParseContext::with_comments();
   assert_eq_parser_str(
     comment,
     "// lol   \\\n   foo\n",
     Ok(("", " lol   \\\n   foo")),
+    &ctx,
+  );
+  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
+  assert_eq!(
+    ctx.comments().as_ref().unwrap()[0].text(),
+    " lol   \\\n   foo"
   );
 }
 
 #[test]
 fn parse_multiline_comment() {
-  assert_eq_parser_str(comment, "/* lol\nfoo\n*/bar", Ok(("bar", " lol\nfoo\n")));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser_str(
+    comment,
+    "/* lol\nfoo\n*/bar",
+    Ok(("bar", " lol\nfoo\n")),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_unsigned_suffix() {
-  assert_eq_parser(unsigned_suffix, "u", Ok(("", 'u')));
-  assert_eq_parser(unsigned_suffix, "U", Ok(("", 'U')));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unsigned_suffix, "u", Ok(("", 'u')), &ctx);
+  assert_eq_parser(unsigned_suffix, "U", Ok(("", 'U')), &ctx);
 }
 
 #[test]
 fn parse_nonzero_digits() {
-  assert_eq_parser_str(nonzero_digits, "3", Ok(("", "3")));
-  assert_eq_parser_str(nonzero_digits, "12345953", Ok(("", "12345953")));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser_str(nonzero_digits, "3", Ok(("", "3")), &ctx);
+  assert_eq_parser_str(nonzero_digits, "12345953", Ok(("", "12345953")), &ctx);
 }
 
 #[test]
 fn parse_decimal_lit() {
-  assert_eq_parser(decimal_lit, "3", Ok(("", Ok(3))));
-  assert_eq_parser(decimal_lit, "3", Ok(("", Ok(3))));
-  assert_eq_parser(decimal_lit, "13", Ok(("", Ok(13))));
-  assert_eq_parser(decimal_lit, "42", Ok(("", Ok(42))));
-  assert_eq_parser(decimal_lit, "123456", Ok(("", Ok(123456))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(decimal_lit, "3", Ok(("", Ok(3))), &ctx);
+  assert_eq_parser(decimal_lit, "3", Ok(("", Ok(3))), &ctx);
+  assert_eq_parser(decimal_lit, "13", Ok(("", Ok(13))), &ctx);
+  assert_eq_parser(decimal_lit, "42", Ok(("", Ok(42))), &ctx);
+  assert_eq_parser(decimal_lit, "123456", Ok(("", Ok(123456))), &ctx);
 }
 
 #[test]
 fn parse_octal_lit() {
-  assert_eq_parser(octal_lit, "0", Ok(("", Ok(0o0))));
-  assert_eq_parser(octal_lit, "03 ", Ok((" ", Ok(0o3))));
-  assert_eq_parser(octal_lit, "012 ", Ok((" ", Ok(0o12))));
-  assert_eq_parser(octal_lit, "07654321 ", Ok((" ", Ok(0o7654321))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(octal_lit, "0", Ok(("", Ok(0o0))), &ctx);
+  assert_eq_parser(octal_lit, "03 ", Ok((" ", Ok(0o3))), &ctx);
+  assert_eq_parser(octal_lit, "012 ", Ok((" ", Ok(0o12))), &ctx);
+  assert_eq_parser(octal_lit, "07654321 ", Ok((" ", Ok(0o7654321))), &ctx);
 }
 
 #[test]
 fn parse_hexadecimal_lit() {
-  assert_eq_parser(hexadecimal_lit, "0x3 ", Ok((" ", Ok(0x3))));
-  assert_eq_parser(hexadecimal_lit, "0x0123789", Ok(("", Ok(0x0123789))));
-  assert_eq_parser(hexadecimal_lit, "0xABCDEF", Ok(("", Ok(0xabcdef))));
-  assert_eq_parser(hexadecimal_lit, "0xabcdef", Ok(("", Ok(0xabcdef))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(hexadecimal_lit, "0x3 ", Ok((" ", Ok(0x3))), &ctx);
+  assert_eq_parser(hexadecimal_lit, "0x0123789", Ok(("", Ok(0x0123789))), &ctx);
+  assert_eq_parser(hexadecimal_lit, "0xABCDEF", Ok(("", Ok(0xabcdef))), &ctx);
+  assert_eq_parser(hexadecimal_lit, "0xabcdef", Ok(("", Ok(0xabcdef))), &ctx);
 }
 
 #[test]
 fn parse_integral_lit() {
-  assert_eq_parser(integral_lit, "0", Ok(("", 0)));
-  assert_eq_parser(integral_lit, "3", Ok(("", 3)));
-  assert_eq_parser(integral_lit, "3 ", Ok((" ", 3)));
-  assert_eq_parser(integral_lit, "03 ", Ok((" ", 3)));
-  assert_eq_parser(integral_lit, "076556 ", Ok((" ", 0o76556)));
-  assert_eq_parser(integral_lit, "012 ", Ok((" ", 0o12)));
-  assert_eq_parser(integral_lit, "0x3 ", Ok((" ", 0x3)));
-  assert_eq_parser(integral_lit, "0x9ABCDEF", Ok(("", 0x9ABCDEF)));
-  assert_eq_parser(integral_lit, "0x9ABCDEF", Ok(("", 0x9ABCDEF)));
-  assert_eq_parser(integral_lit, "0x9abcdef", Ok(("", 0x9abcdef)));
-  assert_eq_parser(integral_lit, "0x9abcdef", Ok(("", 0x9abcdef)));
-  assert_eq_parser(integral_lit, "0xffffffff", Ok(("", 0xffffffffu32 as i32)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(integral_lit, "0", Ok(("", 0)), &ctx);
+  assert_eq_parser(integral_lit, "3", Ok(("", 3)), &ctx);
+  assert_eq_parser(integral_lit, "3 ", Ok((" ", 3)), &ctx);
+  assert_eq_parser(integral_lit, "03 ", Ok((" ", 3)), &ctx);
+  assert_eq_parser(integral_lit, "076556 ", Ok((" ", 0o76556)), &ctx);
+  assert_eq_parser(integral_lit, "012 ", Ok((" ", 0o12)), &ctx);
+  assert_eq_parser(integral_lit, "0x3 ", Ok((" ", 0x3)), &ctx);
+  assert_eq_parser(integral_lit, "0x9ABCDEF", Ok(("", 0x9ABCDEF)), &ctx);
+  assert_eq_parser(integral_lit, "0x9ABCDEF", Ok(("", 0x9ABCDEF)), &ctx);
+  assert_eq_parser(integral_lit, "0x9abcdef", Ok(("", 0x9abcdef)), &ctx);
+  assert_eq_parser(integral_lit, "0x9abcdef", Ok(("", 0x9abcdef)), &ctx);
+  assert_eq_parser(
+    integral_lit,
+    "0xffffffff",
+    Ok(("", 0xffffffffu32 as i32)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_integral_neg_lit() {
-  assert_eq_parser(integral_lit, "-3", Ok(("", -3)));
-  assert_eq_parser(integral_lit, "-3 ", Ok((" ", -3)));
-  assert_eq_parser(integral_lit, "-03 ", Ok((" ", -3)));
-  assert_eq_parser(integral_lit, "-076556 ", Ok((" ", -0o76556)));
-  assert_eq_parser(integral_lit, "-012 ", Ok((" ", -0o12)));
-  assert_eq_parser(integral_lit, "-0x3 ", Ok((" ", -0x3)));
-  assert_eq_parser(integral_lit, "-0x9ABCDEF", Ok(("", -0x9ABCDEF)));
-  assert_eq_parser(integral_lit, "-0x9ABCDEF", Ok(("", -0x9ABCDEF)));
-  assert_eq_parser(integral_lit, "-0x9abcdef", Ok(("", -0x9abcdef)));
-  assert_eq_parser(integral_lit, "-0x9abcdef", Ok(("", -0x9abcdef)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(integral_lit, "-3", Ok(("", -3)), &ctx);
+  assert_eq_parser(integral_lit, "-3 ", Ok((" ", -3)), &ctx);
+  assert_eq_parser(integral_lit, "-03 ", Ok((" ", -3)), &ctx);
+  assert_eq_parser(integral_lit, "-076556 ", Ok((" ", -0o76556)), &ctx);
+  assert_eq_parser(integral_lit, "-012 ", Ok((" ", -0o12)), &ctx);
+  assert_eq_parser(integral_lit, "-0x3 ", Ok((" ", -0x3)), &ctx);
+  assert_eq_parser(integral_lit, "-0x9ABCDEF", Ok(("", -0x9ABCDEF)), &ctx);
+  assert_eq_parser(integral_lit, "-0x9ABCDEF", Ok(("", -0x9ABCDEF)), &ctx);
+  assert_eq_parser(integral_lit, "-0x9abcdef", Ok(("", -0x9abcdef)), &ctx);
+  assert_eq_parser(integral_lit, "-0x9abcdef", Ok(("", -0x9abcdef)), &ctx);
 }
 
 #[test]
 fn parse_unsigned_lit() {
-  assert_eq_parser(unsigned_lit, "0xffffffffU", Ok(("", 0xffffffff as u32)));
-  assert_eq_parser(unsigned_lit, "-1u", Ok(("", 0xffffffff as u32)));
-  assert!(unsigned_lit(LocatedSpan::new("0xfffffffffU")).is_err());
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    unsigned_lit,
+    "0xffffffffU",
+    Ok(("", 0xffffffff as u32)),
+    &ctx,
+  );
+  assert_eq_parser(unsigned_lit, "-1u", Ok(("", 0xffffffff as u32)), &ctx);
+  assert!(unsigned_lit(ParseInput::new("0xfffffffffU", &ParseContext::new())).is_err());
 }
 
 #[test]
 fn parse_float_lit() {
-  assert_eq_parser(float_lit, "0.;", Ok((";", 0.)));
-  assert_eq_parser(float_lit, ".0;", Ok((";", 0.)));
-  assert_eq_parser(float_lit, ".035 ", Ok((" ", 0.035)));
-  assert_eq_parser(float_lit, "0. ", Ok((" ", 0.)));
-  assert_eq_parser(float_lit, "0.035 ", Ok((" ", 0.035)));
-  assert_eq_parser(float_lit, ".035f", Ok(("", 0.035)));
-  assert_eq_parser(float_lit, "0.f", Ok(("", 0.)));
-  assert_eq_parser(float_lit, "314.f", Ok(("", 314.)));
-  assert_eq_parser(float_lit, "0.035f", Ok(("", 0.035)));
-  assert_eq_parser(float_lit, ".035F", Ok(("", 0.035)));
-  assert_eq_parser(float_lit, "0.F", Ok(("", 0.)));
-  assert_eq_parser(float_lit, "0.035F", Ok(("", 0.035)));
-  assert_eq_parser(float_lit, "1.03e+34 ", Ok((" ", 1.03e+34)));
-  assert_eq_parser(float_lit, "1.03E+34 ", Ok((" ", 1.03E+34)));
-  assert_eq_parser(float_lit, "1.03e-34 ", Ok((" ", 1.03e-34)));
-  assert_eq_parser(float_lit, "1.03E-34 ", Ok((" ", 1.03E-34)));
-  assert_eq_parser(float_lit, "1.03e+34f", Ok(("", 1.03e+34)));
-  assert_eq_parser(float_lit, "1.03E+34f", Ok(("", 1.03E+34)));
-  assert_eq_parser(float_lit, "1.03e-34f", Ok(("", 1.03e-34)));
-  assert_eq_parser(float_lit, "1.03E-34f", Ok(("", 1.03E-34)));
-  assert_eq_parser(float_lit, "1.03e+34F", Ok(("", 1.03e+34)));
-  assert_eq_parser(float_lit, "1.03E+34F", Ok(("", 1.03E+34)));
-  assert_eq_parser(float_lit, "1.03e-34F", Ok(("", 1.03e-34)));
-  assert_eq_parser(float_lit, "1.03E-34F", Ok(("", 1.03E-34)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(float_lit, "0.;", Ok((";", 0.)), &ctx);
+  assert_eq_parser(float_lit, ".0;", Ok((";", 0.)), &ctx);
+  assert_eq_parser(float_lit, ".035 ", Ok((" ", 0.035)), &ctx);
+  assert_eq_parser(float_lit, "0. ", Ok((" ", 0.)), &ctx);
+  assert_eq_parser(float_lit, "0.035 ", Ok((" ", 0.035)), &ctx);
+  assert_eq_parser(float_lit, ".035f", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(float_lit, "0.f", Ok(("", 0.)), &ctx);
+  assert_eq_parser(float_lit, "314.f", Ok(("", 314.)), &ctx);
+  assert_eq_parser(float_lit, "0.035f", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(float_lit, ".035F", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(float_lit, "0.F", Ok(("", 0.)), &ctx);
+  assert_eq_parser(float_lit, "0.035F", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(float_lit, "1.03e+34 ", Ok((" ", 1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E+34 ", Ok((" ", 1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03e-34 ", Ok((" ", 1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E-34 ", Ok((" ", 1.03E-34)), &ctx);
+  assert_eq_parser(float_lit, "1.03e+34f", Ok(("", 1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E+34f", Ok(("", 1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03e-34f", Ok(("", 1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E-34f", Ok(("", 1.03E-34)), &ctx);
+  assert_eq_parser(float_lit, "1.03e+34F", Ok(("", 1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E+34F", Ok(("", 1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "1.03e-34F", Ok(("", 1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "1.03E-34F", Ok(("", 1.03E-34)), &ctx);
 }
 
 #[test]
 fn parse_float_neg_lit() {
-  assert_eq_parser(float_lit, "-.035 ", Ok((" ", -0.035)));
-  assert_eq_parser(float_lit, "-0. ", Ok((" ", -0.)));
-  assert_eq_parser(float_lit, "-0.035 ", Ok((" ", -0.035)));
-  assert_eq_parser(float_lit, "-.035f", Ok(("", -0.035)));
-  assert_eq_parser(float_lit, "-0.f", Ok(("", -0.)));
-  assert_eq_parser(float_lit, "-0.035f", Ok(("", -0.035)));
-  assert_eq_parser(float_lit, "-.035F", Ok(("", -0.035)));
-  assert_eq_parser(float_lit, "-0.F", Ok(("", -0.)));
-  assert_eq_parser(float_lit, "-0.035F", Ok(("", -0.035)));
-  assert_eq_parser(float_lit, "-1.03e+34 ", Ok((" ", -1.03e+34)));
-  assert_eq_parser(float_lit, "-1.03E+34 ", Ok((" ", -1.03E+34)));
-  assert_eq_parser(float_lit, "-1.03e-34 ", Ok((" ", -1.03e-34)));
-  assert_eq_parser(float_lit, "-1.03E-34 ", Ok((" ", -1.03E-34)));
-  assert_eq_parser(float_lit, "-1.03e+34f", Ok(("", -1.03e+34)));
-  assert_eq_parser(float_lit, "-1.03E+34f", Ok(("", -1.03E+34)));
-  assert_eq_parser(float_lit, "-1.03e-34f", Ok(("", -1.03e-34)));
-  assert_eq_parser(float_lit, "-1.03E-34f", Ok(("", -1.03E-34)));
-  assert_eq_parser(float_lit, "-1.03e+34F", Ok(("", -1.03e+34)));
-  assert_eq_parser(float_lit, "-1.03E+34F", Ok(("", -1.03E+34)));
-  assert_eq_parser(float_lit, "-1.03e-34F", Ok(("", -1.03e-34)));
-  assert_eq_parser(float_lit, "-1.03E-34F", Ok(("", -1.03E-34)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(float_lit, "-.035 ", Ok((" ", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-0. ", Ok((" ", -0.)), &ctx);
+  assert_eq_parser(float_lit, "-0.035 ", Ok((" ", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-.035f", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-0.f", Ok(("", -0.)), &ctx);
+  assert_eq_parser(float_lit, "-0.035f", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-.035F", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-0.F", Ok(("", -0.)), &ctx);
+  assert_eq_parser(float_lit, "-0.035F", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e+34 ", Ok((" ", -1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E+34 ", Ok((" ", -1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e-34 ", Ok((" ", -1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E-34 ", Ok((" ", -1.03E-34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e+34f", Ok(("", -1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E+34f", Ok(("", -1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e-34f", Ok(("", -1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E-34f", Ok(("", -1.03E-34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e+34F", Ok(("", -1.03e+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E+34F", Ok(("", -1.03E+34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03e-34F", Ok(("", -1.03e-34)), &ctx);
+  assert_eq_parser(float_lit, "-1.03E-34F", Ok(("", -1.03E-34)), &ctx);
 }
 
 #[test]
 fn parse_double_lit() {
-  assert_eq_parser(double_lit, "0.;", Ok((";", 0.)));
-  assert_eq_parser(double_lit, ".0;", Ok((";", 0.)));
-  assert_eq_parser(double_lit, ".035 ", Ok((" ", 0.035)));
-  assert_eq_parser(double_lit, "0. ", Ok((" ", 0.)));
-  assert_eq_parser(double_lit, "0.035 ", Ok((" ", 0.035)));
-  assert_eq_parser(double_lit, "0.lf", Ok(("", 0.)));
-  assert_eq_parser(double_lit, "0.035lf", Ok(("", 0.035)));
-  assert_eq_parser(double_lit, ".035lf", Ok(("", 0.035)));
-  assert_eq_parser(double_lit, ".035LF", Ok(("", 0.035)));
-  assert_eq_parser(double_lit, "0.LF", Ok(("", 0.)));
-  assert_eq_parser(double_lit, "0.035LF", Ok(("", 0.035)));
-  assert_eq_parser(double_lit, "1.03e+34lf", Ok(("", 1.03e+34)));
-  assert_eq_parser(double_lit, "1.03E+34lf", Ok(("", 1.03E+34)));
-  assert_eq_parser(double_lit, "1.03e-34lf", Ok(("", 1.03e-34)));
-  assert_eq_parser(double_lit, "1.03E-34lf", Ok(("", 1.03E-34)));
-  assert_eq_parser(double_lit, "1.03e+34LF", Ok(("", 1.03e+34)));
-  assert_eq_parser(double_lit, "1.03E+34LF", Ok(("", 1.03E+34)));
-  assert_eq_parser(double_lit, "1.03e-34LF", Ok(("", 1.03e-34)));
-  assert_eq_parser(double_lit, "1.03E-34LF", Ok(("", 1.03E-34)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(double_lit, "0.;", Ok((";", 0.)), &ctx);
+  assert_eq_parser(double_lit, ".0;", Ok((";", 0.)), &ctx);
+  assert_eq_parser(double_lit, ".035 ", Ok((" ", 0.035)), &ctx);
+  assert_eq_parser(double_lit, "0. ", Ok((" ", 0.)), &ctx);
+  assert_eq_parser(double_lit, "0.035 ", Ok((" ", 0.035)), &ctx);
+  assert_eq_parser(double_lit, "0.lf", Ok(("", 0.)), &ctx);
+  assert_eq_parser(double_lit, "0.035lf", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(double_lit, ".035lf", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(double_lit, ".035LF", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(double_lit, "0.LF", Ok(("", 0.)), &ctx);
+  assert_eq_parser(double_lit, "0.035LF", Ok(("", 0.035)), &ctx);
+  assert_eq_parser(double_lit, "1.03e+34lf", Ok(("", 1.03e+34)), &ctx);
+  assert_eq_parser(double_lit, "1.03E+34lf", Ok(("", 1.03E+34)), &ctx);
+  assert_eq_parser(double_lit, "1.03e-34lf", Ok(("", 1.03e-34)), &ctx);
+  assert_eq_parser(double_lit, "1.03E-34lf", Ok(("", 1.03E-34)), &ctx);
+  assert_eq_parser(double_lit, "1.03e+34LF", Ok(("", 1.03e+34)), &ctx);
+  assert_eq_parser(double_lit, "1.03E+34LF", Ok(("", 1.03E+34)), &ctx);
+  assert_eq_parser(double_lit, "1.03e-34LF", Ok(("", 1.03e-34)), &ctx);
+  assert_eq_parser(double_lit, "1.03E-34LF", Ok(("", 1.03E-34)), &ctx);
 }
 
 #[test]
 fn parse_double_neg_lit() {
-  assert_eq_parser(double_lit, "-0.;", Ok((";", -0.)));
-  assert_eq_parser(double_lit, "-.0;", Ok((";", -0.)));
-  assert_eq_parser(double_lit, "-.035 ", Ok((" ", -0.035)));
-  assert_eq_parser(double_lit, "-0. ", Ok((" ", -0.)));
-  assert_eq_parser(double_lit, "-0.035 ", Ok((" ", -0.035)));
-  assert_eq_parser(double_lit, "-0.lf", Ok(("", -0.)));
-  assert_eq_parser(double_lit, "-0.035lf", Ok(("", -0.035)));
-  assert_eq_parser(double_lit, "-.035lf", Ok(("", -0.035)));
-  assert_eq_parser(double_lit, "-.035LF", Ok(("", -0.035)));
-  assert_eq_parser(double_lit, "-0.LF", Ok(("", -0.)));
-  assert_eq_parser(double_lit, "-0.035LF", Ok(("", -0.035)));
-  assert_eq_parser(double_lit, "-1.03e+34lf", Ok(("", -1.03e+34)));
-  assert_eq_parser(double_lit, "-1.03E+34lf", Ok(("", -1.03E+34)));
-  assert_eq_parser(double_lit, "-1.03e-34lf", Ok(("", -1.03e-34)));
-  assert_eq_parser(double_lit, "-1.03E-34lf", Ok(("", -1.03E-34)));
-  assert_eq_parser(double_lit, "-1.03e+34LF", Ok(("", -1.03e+34)));
-  assert_eq_parser(double_lit, "-1.03E+34LF", Ok(("", -1.03E+34)));
-  assert_eq_parser(double_lit, "-1.03e-34LF", Ok(("", -1.03e-34)));
-  assert_eq_parser(double_lit, "-1.03E-34LF", Ok(("", -1.03E-34)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(double_lit, "-0.;", Ok((";", -0.)), &ctx);
+  assert_eq_parser(double_lit, "-.0;", Ok((";", -0.)), &ctx);
+  assert_eq_parser(double_lit, "-.035 ", Ok((" ", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-0. ", Ok((" ", -0.)), &ctx);
+  assert_eq_parser(double_lit, "-0.035 ", Ok((" ", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-0.lf", Ok(("", -0.)), &ctx);
+  assert_eq_parser(double_lit, "-0.035lf", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-.035lf", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-.035LF", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-0.LF", Ok(("", -0.)), &ctx);
+  assert_eq_parser(double_lit, "-0.035LF", Ok(("", -0.035)), &ctx);
+  assert_eq_parser(double_lit, "-1.03e+34lf", Ok(("", -1.03e+34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03E+34lf", Ok(("", -1.03E+34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03e-34lf", Ok(("", -1.03e-34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03E-34lf", Ok(("", -1.03E-34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03e+34LF", Ok(("", -1.03e+34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03E+34LF", Ok(("", -1.03E+34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03e-34LF", Ok(("", -1.03e-34)), &ctx);
+  assert_eq_parser(double_lit, "-1.03E-34LF", Ok(("", -1.03E-34)), &ctx);
 }
 
 #[test]
 fn parse_bool_lit() {
-  assert_eq_parser(bool_lit, "false", Ok(("", false)));
-  assert_eq_parser(bool_lit, "true", Ok(("", true)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(bool_lit, "false", Ok(("", false)), &ctx);
+  assert_eq_parser(bool_lit, "true", Ok(("", true)), &ctx);
 }
 
 #[test]
 fn parse_identifier() {
-  assert_eq_parser(identifier, "a", Ok(("", "a".into())));
-  assert_eq_parser(identifier, "ab_cd", Ok(("", "ab_cd".into())));
-  assert_eq_parser(identifier, "Ab_cd", Ok(("", "Ab_cd".into())));
-  assert_eq_parser(identifier, "Ab_c8d", Ok(("", "Ab_c8d".into())));
-  assert_eq_parser(identifier, "Ab_c8d9", Ok(("", "Ab_c8d9".into())));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(identifier, "a", Ok(("", "a".into())), &ctx);
+  assert_eq_parser(identifier, "ab_cd", Ok(("", "ab_cd".into())), &ctx);
+  assert_eq_parser(identifier, "Ab_cd", Ok(("", "Ab_cd".into())), &ctx);
+  assert_eq_parser(identifier, "Ab_c8d", Ok(("", "Ab_c8d".into())), &ctx);
+  assert_eq_parser(identifier, "Ab_c8d9", Ok(("", "Ab_c8d9".into())), &ctx);
 }
 
 #[test]
 fn parse_unary_op_add() {
-  assert_eq_parser(unary_op, "+ ", Ok((" ", syntax::UnaryOp::Add)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "+ ", Ok((" ", syntax::UnaryOp::Add)), &ctx);
 }
 
 #[test]
 fn parse_unary_op_minus() {
-  assert_eq_parser(unary_op, "- ", Ok((" ", syntax::UnaryOp::Minus)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "- ", Ok((" ", syntax::UnaryOp::Minus)), &ctx);
 }
 
 #[test]
 fn parse_unary_op_not() {
-  assert_eq_parser(unary_op, "!", Ok(("", syntax::UnaryOp::Not)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "!", Ok(("", syntax::UnaryOp::Not)), &ctx);
 }
 
 #[test]
 fn parse_unary_op_complement() {
-  assert_eq_parser(unary_op, "~", Ok(("", syntax::UnaryOp::Complement)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "~", Ok(("", syntax::UnaryOp::Complement)), &ctx);
 }
 
 #[test]
 fn parse_unary_op_inc() {
-  assert_eq_parser(unary_op, "++", Ok(("", syntax::UnaryOp::Inc)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "++", Ok(("", syntax::UnaryOp::Inc)), &ctx);
 }
 
 #[test]
 fn parse_unary_op_dec() {
-  assert_eq_parser(unary_op, "--", Ok(("", syntax::UnaryOp::Dec)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(unary_op, "--", Ok(("", syntax::UnaryOp::Dec)), &ctx);
 }
 
 #[test]
 fn parse_array_specifier_dimension_unsized() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     array_specifier_dimension,
     "[]",
     Ok(("", syntax::ArraySpecifierDimension::Unsized)),
+    &ctx,
   );
   assert_eq_parser(
     array_specifier_dimension,
     "[ ]",
     Ok(("", syntax::ArraySpecifierDimension::Unsized)),
+    &ctx,
   );
   assert_eq_parser(
     array_specifier_dimension,
     "[\n]",
     Ok(("", syntax::ArraySpecifierDimension::Unsized)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_array_specifier_dimension_sized() {
+  let ctx = ParseContext::new();
+
   let ix = syntax::Expr::IntConst(0);
 
   assert_eq_parser(
@@ -325,6 +409,7 @@ fn parse_array_specifier_dimension_sized() {
       "",
       syntax::ArraySpecifierDimension::ExplicitlySized(Box::new(ix.clone())),
     )),
+    &ctx,
   );
   assert_eq_parser(
     array_specifier_dimension,
@@ -333,6 +418,7 @@ fn parse_array_specifier_dimension_sized() {
       "",
       syntax::ArraySpecifierDimension::ExplicitlySized(Box::new(ix)),
     )),
+    &ctx,
   );
 }
 
@@ -347,6 +433,7 @@ fn parse_array_specifier_unsized() {
         dimensions: syntax::NonEmpty(vec![syntax::ArraySpecifierDimension::Unsized]),
       },
     )),
+    &ctx,
   );
 }
 
@@ -365,6 +452,7 @@ fn parse_array_specifier_sized() {
         )]),
       },
     )),
+    &ctx,
   )
 }
 
@@ -388,148 +476,183 @@ fn parse_array_specifier_sized_multiple() {
         ]),
       },
     )),
+    &ctx,
   )
 }
 
 #[test]
 fn parse_precise_qualifier() {
-  assert_eq_parser(precise_qualifier, "precise ", Ok((" ", ())));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(precise_qualifier, "precise ", Ok((" ", ())), &ctx);
 }
 
 #[test]
 fn parse_invariant_qualifier() {
-  assert_eq_parser(invariant_qualifier, "invariant ", Ok((" ", ())));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(invariant_qualifier, "invariant ", Ok((" ", ())), &ctx);
 }
 
 #[test]
 fn parse_interpolation_qualifier() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     interpolation_qualifier,
     "smooth ",
     Ok((" ", syntax::InterpolationQualifier::Smooth)),
+    &ctx,
   );
   assert_eq_parser(
     interpolation_qualifier,
     "flat ",
     Ok((" ", syntax::InterpolationQualifier::Flat)),
+    &ctx,
   );
   assert_eq_parser(
     interpolation_qualifier,
     "noperspective ",
     Ok((" ", syntax::InterpolationQualifier::NoPerspective)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_precision_qualifier() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     precision_qualifier,
     "highp ",
     Ok((" ", syntax::PrecisionQualifier::High)),
+    &ctx,
   );
   assert_eq_parser(
     precision_qualifier,
     "mediump ",
     Ok((" ", syntax::PrecisionQualifier::Medium)),
+    &ctx,
   );
   assert_eq_parser(
     precision_qualifier,
     "lowp ",
     Ok((" ", syntax::PrecisionQualifier::Low)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_storage_qualifier() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     storage_qualifier,
     "const ",
     Ok((" ", syntax::StorageQualifier::Const)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "inout ",
     Ok((" ", syntax::StorageQualifier::InOut)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "in ",
     Ok((" ", syntax::StorageQualifier::In)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "out ",
     Ok((" ", syntax::StorageQualifier::Out)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "centroid ",
     Ok((" ", syntax::StorageQualifier::Centroid)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "patch ",
     Ok((" ", syntax::StorageQualifier::Patch)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "sample ",
     Ok((" ", syntax::StorageQualifier::Sample)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "uniform ",
     Ok((" ", syntax::StorageQualifier::Uniform)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "attribute ",
     Ok((" ", syntax::StorageQualifier::Attribute)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "varying ",
     Ok((" ", syntax::StorageQualifier::Varying)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "buffer ",
     Ok((" ", syntax::StorageQualifier::Buffer)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "shared ",
     Ok((" ", syntax::StorageQualifier::Shared)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "coherent ",
     Ok((" ", syntax::StorageQualifier::Coherent)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "volatile ",
     Ok((" ", syntax::StorageQualifier::Volatile)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "restrict ",
     Ok((" ", syntax::StorageQualifier::Restrict)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "readonly ",
     Ok((" ", syntax::StorageQualifier::ReadOnly)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "writeonly ",
     Ok((" ", syntax::StorageQualifier::WriteOnly)),
+    &ctx,
   );
   assert_eq_parser(
     storage_qualifier,
     "subroutine a",
     Ok((" a", syntax::StorageQualifier::Subroutine(vec![]))),
+    &ctx,
   );
 
   let a = syntax::TypeName("vec3".to_owned());
@@ -540,11 +663,14 @@ fn parse_storage_qualifier() {
     storage_qualifier,
     "subroutine (  vec3 , float \\\n, dmat43)",
     Ok(("", syntax::StorageQualifier::Subroutine(types))),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_layout_qualifier_std430() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::LayoutQualifier {
     ids: syntax::NonEmpty(vec![syntax::LayoutQualifierSpec::Identifier(
       "std430".into(),
@@ -556,22 +682,27 @@ fn parse_layout_qualifier_std430() {
     layout_qualifier,
     "layout (std430)",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     layout_qualifier,
     "layout  (std430   )",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     layout_qualifier,
     "layout \n\t (  std430  )",
     Ok(("", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser(layout_qualifier, "layout(std430)", Ok(("", expected)));
+  assert_eq_parser(layout_qualifier, "layout(std430)", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_layout_qualifier_shared() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::LayoutQualifier {
     ids: syntax::NonEmpty(vec![syntax::LayoutQualifierSpec::Shared]),
   };
@@ -580,17 +711,21 @@ fn parse_layout_qualifier_shared() {
     layout_qualifier,
     "layout (shared)",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     layout_qualifier,
     "layout ( shared )",
     Ok(("", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser(layout_qualifier, "layout(shared)", Ok(("", expected)));
+  assert_eq_parser(layout_qualifier, "layout(shared)", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_layout_qualifier_list() {
+  let ctx = ParseContext::new();
+
   let id_0 = syntax::LayoutQualifierSpec::Shared;
   let id_1 = syntax::LayoutQualifierSpec::Identifier("std140".into(), None);
   let id_2 = syntax::LayoutQualifierSpec::Identifier(
@@ -605,21 +740,26 @@ fn parse_layout_qualifier_list() {
     layout_qualifier,
     "layout (shared, std140, max_vertices = 3)",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     layout_qualifier,
     "layout(shared,std140,max_vertices=3)",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     layout_qualifier,
     "layout\n\n\t (    shared , std140, max_vertices= 3)",
     Ok(("", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_type_qualifier() {
+  let ctx = ParseContext::new();
+
   let storage_qual = syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Const);
   let id_0 = syntax::LayoutQualifierSpec::Shared;
   let id_1 = syntax::LayoutQualifierSpec::Identifier("std140".into(), None);
@@ -638,16 +778,20 @@ fn parse_type_qualifier() {
     type_qualifier,
     "const layout (shared, std140, max_vertices = 3)",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     type_qualifier,
     "const layout(shared,std140,max_vertices=3)",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_struct_field_specifier() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::StructFieldSpecifier {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -661,16 +805,20 @@ fn parse_struct_field_specifier() {
     struct_field_specifier,
     "vec4 foo;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     struct_field_specifier,
     "vec4     foo ; ",
     Ok((" ", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_struct_field_specifier_type_name() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::StructFieldSpecifier {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -684,16 +832,20 @@ fn parse_struct_field_specifier_type_name() {
     struct_field_specifier,
     "S0238_3 x;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     struct_field_specifier,
     "S0238_3     x ;",
     Ok(("", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_struct_field_specifier_several() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::StructFieldSpecifier {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -707,16 +859,20 @@ fn parse_struct_field_specifier_several() {
     struct_field_specifier,
     "vec4 foo, bar, zoo;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     struct_field_specifier,
     "vec4     foo , bar  , zoo ;",
     Ok(("", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_struct_specifier_one_field() {
+  let ctx = ParseContext::new();
+
   let field = syntax::StructFieldSpecifier {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -734,16 +890,20 @@ fn parse_struct_specifier_one_field() {
     struct_specifier,
     "struct TestStruct { vec4 foo; }",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     struct_specifier,
     "struct      TestStruct \n \n\n {\n    vec4   foo  ;}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_struct_specifier_multi_fields() {
+  let ctx = ParseContext::new();
+
   let a = syntax::StructFieldSpecifier {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -790,609 +950,730 @@ fn parse_struct_specifier_multi_fields() {
   };
 
   assert_eq_parser(
-    struct_specifier, "struct _TestStruct_934i { vec4 foo; float bar; uint zoo; bvec3 foo_BAR_zoo3497_34; S0238_3 x; }"
-    ,
-    Ok(("", expected.clone()))
+    struct_specifier, "struct _TestStruct_934i { vec4 foo; float bar; uint zoo; bvec3 foo_BAR_zoo3497_34; S0238_3 x; }",
+    Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     struct_specifier,
     "struct _TestStruct_934i{vec4 foo;float bar;uint zoo;bvec3 foo_BAR_zoo3497_34;S0238_3 x;}",
     Ok(("", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser(struct_specifier, "struct _TestStruct_934i\n   {  vec4\nfoo ;   \n\t float\n\t\t  bar  ;   \nuint   zoo;    \n bvec3   foo_BAR_zoo3497_34\n\n\t\n\t\n  ; S0238_3 x;}", Ok(("", expected)));
+  assert_eq_parser(struct_specifier, "struct _TestStruct_934i\n   {  vec4\nfoo ;   \n\t float\n\t\t  bar  ;   \nuint   zoo;    \n bvec3   foo_BAR_zoo3497_34\n\n\t\n\t\n  ; S0238_3 x;}", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_type_specifier_non_array() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     type_specifier_non_array,
     "bool",
     Ok(("", syntax::TypeSpecifierNonArray::Bool)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "int",
     Ok(("", syntax::TypeSpecifierNonArray::Int)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uint",
     Ok(("", syntax::TypeSpecifierNonArray::UInt)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "float",
     Ok(("", syntax::TypeSpecifierNonArray::Float)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "double",
     Ok(("", syntax::TypeSpecifierNonArray::Double)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "vec2",
     Ok(("", syntax::TypeSpecifierNonArray::Vec2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "vec3",
     Ok(("", syntax::TypeSpecifierNonArray::Vec3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "vec4",
     Ok(("", syntax::TypeSpecifierNonArray::Vec4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dvec2",
     Ok(("", syntax::TypeSpecifierNonArray::DVec2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dvec3",
     Ok(("", syntax::TypeSpecifierNonArray::DVec3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dvec4",
     Ok(("", syntax::TypeSpecifierNonArray::DVec4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "bvec2",
     Ok(("", syntax::TypeSpecifierNonArray::BVec2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "bvec3",
     Ok(("", syntax::TypeSpecifierNonArray::BVec3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "bvec4",
     Ok(("", syntax::TypeSpecifierNonArray::BVec4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "ivec2",
     Ok(("", syntax::TypeSpecifierNonArray::IVec2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "ivec3",
     Ok(("", syntax::TypeSpecifierNonArray::IVec3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "ivec4",
     Ok(("", syntax::TypeSpecifierNonArray::IVec4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uvec2",
     Ok(("", syntax::TypeSpecifierNonArray::UVec2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uvec3",
     Ok(("", syntax::TypeSpecifierNonArray::UVec3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uvec4",
     Ok(("", syntax::TypeSpecifierNonArray::UVec4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat2",
     Ok(("", syntax::TypeSpecifierNonArray::Mat2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat3",
     Ok(("", syntax::TypeSpecifierNonArray::Mat3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat4",
     Ok(("", syntax::TypeSpecifierNonArray::Mat4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat2x2",
     Ok(("", syntax::TypeSpecifierNonArray::Mat2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat2x3",
     Ok(("", syntax::TypeSpecifierNonArray::Mat23)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat2x4",
     Ok(("", syntax::TypeSpecifierNonArray::Mat24)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat3x2",
     Ok(("", syntax::TypeSpecifierNonArray::Mat32)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat3x3",
     Ok(("", syntax::TypeSpecifierNonArray::Mat3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat3x4",
     Ok(("", syntax::TypeSpecifierNonArray::Mat34)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat4x2",
     Ok(("", syntax::TypeSpecifierNonArray::Mat42)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat4x3",
     Ok(("", syntax::TypeSpecifierNonArray::Mat43)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "mat4x4",
     Ok(("", syntax::TypeSpecifierNonArray::Mat4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat2",
     Ok(("", syntax::TypeSpecifierNonArray::DMat2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat3",
     Ok(("", syntax::TypeSpecifierNonArray::DMat3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat4",
     Ok(("", syntax::TypeSpecifierNonArray::DMat4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat2x2",
     Ok(("", syntax::TypeSpecifierNonArray::DMat2)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat2x3",
     Ok(("", syntax::TypeSpecifierNonArray::DMat23)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat2x4",
     Ok(("", syntax::TypeSpecifierNonArray::DMat24)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat3x2",
     Ok(("", syntax::TypeSpecifierNonArray::DMat32)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat3x3",
     Ok(("", syntax::TypeSpecifierNonArray::DMat3)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat3x4",
     Ok(("", syntax::TypeSpecifierNonArray::DMat34)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat4x2",
     Ok(("", syntax::TypeSpecifierNonArray::DMat42)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat4x3",
     Ok(("", syntax::TypeSpecifierNonArray::DMat43)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "dmat4x4",
     Ok(("", syntax::TypeSpecifierNonArray::DMat4)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler1D",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image1D",
     Ok(("", syntax::TypeSpecifierNonArray::Image1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2D",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image2D",
     Ok(("", syntax::TypeSpecifierNonArray::Image2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler3D",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image3D",
     Ok(("", syntax::TypeSpecifierNonArray::Image3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "samplerCube",
     Ok(("", syntax::TypeSpecifierNonArray::SamplerCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "imageCube",
     Ok(("", syntax::TypeSpecifierNonArray::ImageCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::Image2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::Image1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::Image2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "samplerBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::SamplerBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "imageBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::ImageBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::Image2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "image2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::Image2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "samplerCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::SamplerCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "imageCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::ImageCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler1DShadow",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler1DShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DShadow",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DRectShadow",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DRectShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler1DArrayShadow",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler1DArrayShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "sampler2DArrayShadow",
     Ok(("", syntax::TypeSpecifierNonArray::Sampler2DArrayShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "samplerCubeShadow",
     Ok(("", syntax::TypeSpecifierNonArray::SamplerCubeShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "samplerCubeArrayShadow",
     Ok(("", syntax::TypeSpecifierNonArray::SamplerCubeArrayShadow)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler1D",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage1D",
     Ok(("", syntax::TypeSpecifierNonArray::IImage1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler2D",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage2D",
     Ok(("", syntax::TypeSpecifierNonArray::IImage2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler3D",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage3D",
     Ok(("", syntax::TypeSpecifierNonArray::IImage3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isamplerCube",
     Ok(("", syntax::TypeSpecifierNonArray::ISamplerCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimageCube",
     Ok(("", syntax::TypeSpecifierNonArray::IImageCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::IImage2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::IImage1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::IImage2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isamplerBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::ISamplerBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimageBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::IImageBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::IImage2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isampler2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::ISampler2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimage2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::IImage2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "isamplerCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::ISamplerCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "iimageCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::IImageCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "atomic_uint",
     Ok(("", syntax::TypeSpecifierNonArray::AtomicUInt)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler1D",
     Ok(("", syntax::TypeSpecifierNonArray::USampler1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage1D",
     Ok(("", syntax::TypeSpecifierNonArray::UImage1D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler2D",
     Ok(("", syntax::TypeSpecifierNonArray::USampler2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage2D",
     Ok(("", syntax::TypeSpecifierNonArray::UImage2D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler3D",
     Ok(("", syntax::TypeSpecifierNonArray::USampler3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage3D",
     Ok(("", syntax::TypeSpecifierNonArray::UImage3D)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usamplerCube",
     Ok(("", syntax::TypeSpecifierNonArray::USamplerCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimageCube",
     Ok(("", syntax::TypeSpecifierNonArray::UImageCube)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::USampler2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage2DRect",
     Ok(("", syntax::TypeSpecifierNonArray::UImage2DRect)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::USampler1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage1DArray",
     Ok(("", syntax::TypeSpecifierNonArray::UImage1DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::USampler2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage2DArray",
     Ok(("", syntax::TypeSpecifierNonArray::UImage2DArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usamplerBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::USamplerBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimageBuffer",
     Ok(("", syntax::TypeSpecifierNonArray::UImageBuffer)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::USampler2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage2DMS",
     Ok(("", syntax::TypeSpecifierNonArray::UImage2DMS)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usampler2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::USampler2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimage2DMSArray",
     Ok(("", syntax::TypeSpecifierNonArray::UImage2DMSArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "usamplerCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::USamplerCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
     "uimageCubeArray",
     Ok(("", syntax::TypeSpecifierNonArray::UImageCubeArray)),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier_non_array,
@@ -1401,11 +1682,14 @@ fn parse_type_specifier_non_array() {
       "",
       syntax::TypeSpecifierNonArray::TypeName(syntax::TypeName::new("ReturnType").unwrap()),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_type_specifier() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     type_specifier,
     "uint;",
@@ -1416,6 +1700,7 @@ fn parse_type_specifier() {
         array_specifier: None,
       },
     )),
+    &ctx,
   );
   assert_eq_parser(
     type_specifier,
@@ -1431,11 +1716,14 @@ fn parse_type_specifier() {
         }),
       },
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_fully_specified_type() {
+  let ctx = ParseContext::new();
+
   let ty = syntax::TypeSpecifier {
     ty: syntax::TypeSpecifierNonArray::IImage2DMSArray,
     array_specifier: None,
@@ -1449,11 +1737,14 @@ fn parse_fully_specified_type() {
     fully_specified_type,
     "iimage2DMSArray;",
     Ok((";", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_fully_specified_type_with_qualifier() {
+  let ctx = ParseContext::new();
+
   let qual_spec = syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Subroutine(vec![
     "vec2".into(),
     "S032_29k".into(),
@@ -1474,148 +1765,234 @@ fn parse_fully_specified_type_with_qualifier() {
     fully_specified_type,
     "subroutine (vec2, S032_29k) iimage2DMSArray;",
     Ok((";", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     fully_specified_type,
     "subroutine (  vec2\t\n \t , \n S032_29k   )\n iimage2DMSArray ;",
     Ok((" ;", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     fully_specified_type,
     "subroutine(vec2,S032_29k)iimage2DMSArray;",
     Ok((";", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_primary_expr_intconst() {
-  assert_eq_parser(primary_expr, "0 ", Ok((" ", syntax::Expr::IntConst(0))));
-  assert_eq_parser(primary_expr, "1 ", Ok((" ", syntax::Expr::IntConst(1))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    primary_expr,
+    "0 ",
+    Ok((" ", syntax::Expr::IntConst(0))),
+    &ctx,
+  );
+  assert_eq_parser(
+    primary_expr,
+    "1 ",
+    Ok((" ", syntax::Expr::IntConst(1))),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_primary_expr_uintconst() {
-  assert_eq_parser(primary_expr, "0u ", Ok((" ", syntax::Expr::UIntConst(0))));
-  assert_eq_parser(primary_expr, "1u ", Ok((" ", syntax::Expr::UIntConst(1))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    primary_expr,
+    "0u ",
+    Ok((" ", syntax::Expr::UIntConst(0))),
+    &ctx,
+  );
+  assert_eq_parser(
+    primary_expr,
+    "1u ",
+    Ok((" ", syntax::Expr::UIntConst(1))),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_primary_expr_floatconst() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     primary_expr,
     "0.f ",
     Ok((" ", syntax::Expr::FloatConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "1.f ",
     Ok((" ", syntax::Expr::FloatConst(1.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "0.F ",
     Ok((" ", syntax::Expr::FloatConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "1.F ",
     Ok((" ", syntax::Expr::FloatConst(1.))),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_primary_expr_doubleconst() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     primary_expr,
     "0. ",
     Ok((" ", syntax::Expr::FloatConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "1. ",
     Ok((" ", syntax::Expr::FloatConst(1.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "0.lf ",
     Ok((" ", syntax::Expr::DoubleConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "1.lf ",
     Ok((" ", syntax::Expr::DoubleConst(1.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "0.LF ",
     Ok((" ", syntax::Expr::DoubleConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "1.LF ",
     Ok((" ", syntax::Expr::DoubleConst(1.))),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_primary_expr_boolconst() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     primary_expr,
     "false",
     Ok(("", syntax::Expr::BoolConst(false.to_owned()))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "true",
     Ok(("", syntax::Expr::BoolConst(true.to_owned()))),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_primary_expr_parens() {
-  assert_eq_parser(primary_expr, "(0)", Ok(("", syntax::Expr::IntConst(0))));
-  assert_eq_parser(primary_expr, "(  0 )", Ok(("", syntax::Expr::IntConst(0))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    primary_expr,
+    "(0)",
+    Ok(("", syntax::Expr::IntConst(0))),
+    &ctx,
+  );
+  assert_eq_parser(
+    primary_expr,
+    "(  0 )",
+    Ok(("", syntax::Expr::IntConst(0))),
+    &ctx,
+  );
   assert_eq_parser(
     primary_expr,
     "(  .0 )",
     Ok(("", syntax::Expr::FloatConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "(  (.0) )",
     Ok(("", syntax::Expr::FloatConst(0.))),
+    &ctx,
   );
   assert_eq_parser(
     primary_expr,
     "(true) ",
     Ok((" ", syntax::Expr::BoolConst(true))),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_postfix_function_call_no_args() {
+  let ctx = ParseContext::new();
+
   let fun = syntax::FunIdentifier::Identifier("vec3".into());
   let args = Vec::new();
   let expected = syntax::Expr::FunCall(fun, args);
 
-  assert_eq_parser(postfix_expr, "vec3();", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "vec3   (  ) ;", Ok((" ;", expected.clone())));
-  assert_eq_parser(postfix_expr, "vec3   (\nvoid\n) ;", Ok((" ;", expected)));
+  assert_eq_parser(postfix_expr, "vec3();", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(
+    postfix_expr,
+    "vec3   (  ) ;",
+    Ok((" ;", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    postfix_expr,
+    "vec3   (\nvoid\n) ;",
+    Ok((" ;", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_postfix_function_call_one_arg() {
+  let ctx = ParseContext::new();
+
   let fun = syntax::FunIdentifier::Identifier("foo".into());
   let args = vec![syntax::Expr::IntConst(0)];
   let expected = syntax::Expr::FunCall(fun, args);
 
-  assert_eq_parser(postfix_expr, "foo(0);", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "foo   ( 0 ) ;", Ok((" ;", expected.clone())));
-  assert_eq_parser(postfix_expr, "foo   (\n0\t\n) ;", Ok((" ;", expected)));
+  assert_eq_parser(postfix_expr, "foo(0);", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(
+    postfix_expr,
+    "foo   ( 0 ) ;",
+    Ok((" ;", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    postfix_expr,
+    "foo   (\n0\t\n) ;",
+    Ok((" ;", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_postfix_function_call_multi_arg() {
+  let ctx = ParseContext::new();
+
   let fun = syntax::FunIdentifier::Identifier("foo".into());
   let args = vec![
     syntax::Expr::IntConst(0),
@@ -1628,16 +2005,20 @@ fn parse_postfix_function_call_multi_arg() {
     postfix_expr,
     "foo(0, false, bar);",
     Ok((";", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     postfix_expr,
     "foo   ( 0\t, false    ,\t\tbar) ;",
     Ok((" ;", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_postfix_expr_bracket() {
+  let ctx = ParseContext::new();
+
   let id = syntax::Expr::Variable("foo".into());
   let array_spec = syntax::ArraySpecifier {
     dimensions: syntax::NonEmpty(vec![syntax::ArraySpecifierDimension::ExplicitlySized(
@@ -1646,112 +2027,173 @@ fn parse_postfix_expr_bracket() {
   };
   let expected = syntax::Expr::Bracket(Box::new(id), array_spec);
 
-  assert_eq_parser(postfix_expr, "foo[7354];", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "foo[\n  7354    ] ;", Ok((";", expected)));
+  assert_eq_parser(
+    postfix_expr,
+    "foo[7354];",
+    Ok((";", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    postfix_expr,
+    "foo[\n  7354    ] ;",
+    Ok((";", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_postfix_expr_dot() {
+  let ctx = ParseContext::new();
+
   let foo = Box::new(syntax::Expr::Variable("foo".into()));
   let expected = syntax::Expr::Dot(foo, "bar".into());
 
-  assert_eq_parser(postfix_expr, "foo.bar;", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "(foo).bar;", Ok((";", expected)));
+  assert_eq_parser(postfix_expr, "foo.bar;", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(postfix_expr, "(foo).bar;", Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_postfix_expr_dot_several() {
+  let ctx = ParseContext::new();
+
   let foo = Box::new(syntax::Expr::Variable("foo".into()));
   let expected = syntax::Expr::Dot(Box::new(syntax::Expr::Dot(foo, "bar".into())), "zoo".into());
 
-  assert_eq_parser(postfix_expr, "foo.bar.zoo;", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "(foo).bar.zoo;", Ok((";", expected.clone())));
-  assert_eq_parser(postfix_expr, "(foo.bar).zoo;", Ok((";", expected)));
+  assert_eq_parser(
+    postfix_expr,
+    "foo.bar.zoo;",
+    Ok((";", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    postfix_expr,
+    "(foo).bar.zoo;",
+    Ok((";", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(postfix_expr, "(foo.bar).zoo;", Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_postfix_postinc() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::PostInc(Box::new(foo));
 
-  assert_eq_parser(postfix_expr, "foo++;", Ok((";", expected.clone())));
+  assert_eq_parser(postfix_expr, "foo++;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_postfix_postdec() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::PostDec(Box::new(foo));
 
-  assert_eq_parser(postfix_expr, "foo--;", Ok((";", expected.clone())));
+  assert_eq_parser(postfix_expr, "foo--;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_unary_add() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Add, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "+foo;", Ok((";", expected.clone())));
+  assert_eq_parser(unary_expr, "+foo;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_unary_minus() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Minus, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "-foo;", Ok((";", expected.clone())));
+  assert_eq_parser(unary_expr, "-foo;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_unary_not() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Not, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "!foo;", Ok((";", expected)));
+  assert_eq_parser(unary_expr, "!foo;", Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_unary_complement() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Complement, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "~foo;", Ok((";", expected.clone())));
+  assert_eq_parser(unary_expr, "~foo;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_unary_inc() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Inc, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "++foo;", Ok((";", expected.clone())));
+  assert_eq_parser(unary_expr, "++foo;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_unary_dec() {
+  let ctx = ParseContext::new();
+
   let foo = syntax::Expr::Variable("foo".into());
   let expected = syntax::Expr::Unary(syntax::UnaryOp::Dec, Box::new(foo));
 
-  assert_eq_parser(unary_expr, "--foo;", Ok((";", expected.clone())));
+  assert_eq_parser(unary_expr, "--foo;", Ok((";", expected.clone())), &ctx);
 }
 
 #[test]
 fn parse_expr_float() {
-  assert_eq_parser(expr, "314.;", Ok((";", syntax::Expr::FloatConst(314.))));
-  assert_eq_parser(expr, "314.f;", Ok((";", syntax::Expr::FloatConst(314.))));
-  assert_eq_parser(expr, "314.LF;", Ok((";", syntax::Expr::DoubleConst(314.))));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    expr,
+    "314.;",
+    Ok((";", syntax::Expr::DoubleConst(314.))),
+    &ctx,
+  );
+  assert_eq_parser(
+    expr,
+    "314.f;",
+    Ok((";", syntax::Expr::FloatConst(314.))),
+    &ctx,
+  );
+  assert_eq_parser(
+    expr,
+    "314.LF;",
+    Ok((";", syntax::Expr::DoubleConst(314.))),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_expr_add_2() {
+  let ctx = ParseContext::new();
+
   let one = Box::new(syntax::Expr::IntConst(1));
   let expected = syntax::Expr::Binary(syntax::BinaryOp::Add, one.clone(), one);
 
-  assert_eq_parser(expr, "1 + 1;", Ok((";", expected.clone())));
-  assert_eq_parser(expr, "1+1;", Ok((";", expected.clone())));
-  assert_eq_parser(expr, "(1 + 1);", Ok((";", expected)));
+  assert_eq_parser(expr, "1 + 1;", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(expr, "1+1;", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(expr, "(1 + 1);", Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_expr_add_3() {
+  let ctx = ParseContext::new();
+
   let one = Box::new(syntax::Expr::UIntConst(1));
   let two = Box::new(syntax::Expr::UIntConst(2));
   let three = Box::new(syntax::Expr::UIntConst(3));
@@ -1761,14 +2203,16 @@ fn parse_expr_add_3() {
     three,
   );
 
-  assert_eq_parser(expr, "1u + 2u + 3u", Ok(("", expected.clone())));
-  assert_eq_parser(expr, "1u + 2u + 3u   ", Ok(("   ", expected.clone())));
-  assert_eq_parser(expr, "1u+2u+3u", Ok(("", expected.clone())));
-  assert_eq_parser(expr, "((1u + 2u) + 3u)", Ok(("", expected)));
+  assert_eq_parser(expr, "1u + 2u + 3u", Ok(("", expected.clone())), &ctx);
+  assert_eq_parser(expr, "1u + 2u + 3u   ", Ok(("   ", expected.clone())), &ctx);
+  assert_eq_parser(expr, "1u+2u+3u", Ok(("", expected.clone())), &ctx);
+  assert_eq_parser(expr, "((1u + 2u) + 3u)", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_expr_add_mult_3() {
+  let ctx = ParseContext::new();
+
   let one = Box::new(syntax::Expr::UIntConst(1));
   let two = Box::new(syntax::Expr::UIntConst(2));
   let three = Box::new(syntax::Expr::UIntConst(3));
@@ -1778,13 +2222,15 @@ fn parse_expr_add_mult_3() {
     three,
   );
 
-  assert_eq_parser(expr, "1u * 2u + 3u ;", Ok((" ;", expected.clone())));
-  assert_eq_parser(expr, "1u*2u+3u;", Ok((";", expected.clone())));
-  assert_eq_parser(expr, "(1u * 2u) + 3u;", Ok((";", expected)));
+  assert_eq_parser(expr, "1u * 2u + 3u ;", Ok((" ;", expected.clone())), &ctx);
+  assert_eq_parser(expr, "1u*2u+3u;", Ok((";", expected.clone())), &ctx);
+  assert_eq_parser(expr, "(1u * 2u) + 3u;", Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_expr_add_sub_mult_div() {
+  let ctx = ParseContext::new();
+
   let one = Box::new(syntax::Expr::IntConst(1));
   let two = Box::new(syntax::Expr::IntConst(2));
   let three = Box::new(syntax::Expr::IntConst(3));
@@ -1809,11 +2255,14 @@ fn parse_expr_add_sub_mult_div() {
     expr,
     "1 * (2 + 3) + 4 / (5 + 6);",
     Ok((";", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_complex_expr() {
+  let ctx = ParseContext::new();
+
   let input = "normalize((inverse(view) * vec4(ray.dir, 0.)).xyz);";
   let zero = syntax::Expr::FloatConst(0.);
   let ray = syntax::Expr::Variable("ray".into());
@@ -1835,27 +2284,58 @@ fn parse_complex_expr() {
   );
   let expected = normalize;
 
-  assert_eq_parser(expr, &input[..], Ok((";", expected)));
+  assert_eq_parser(expr, &input[..], Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_function_identifier_typename() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::FunIdentifier::Identifier("foo".into());
-  assert_eq_parser(function_identifier, "foo(", Ok(("(", expected.clone())));
-  assert_eq_parser(function_identifier, "foo\n\t(", Ok(("(", expected.clone())));
-  assert_eq_parser(function_identifier, "foo\n (", Ok(("(", expected)));
+  assert_eq_parser(
+    function_identifier,
+    "foo(",
+    Ok(("(", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    function_identifier,
+    "foo\n\t(",
+    Ok(("(", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(function_identifier, "foo\n (", Ok(("(", expected)), &ctx);
 }
 
 #[test]
 fn parse_function_identifier_cast() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::FunIdentifier::Identifier("vec3".into());
-  assert_eq_parser(function_identifier, "vec3(", Ok(("(", expected.clone())));
-  assert_eq_parser(function_identifier, "vec3 (", Ok(("(", expected.clone())));
-  assert_eq_parser(function_identifier, "vec3\t\n\n \t (", Ok(("(", expected)));
+  assert_eq_parser(
+    function_identifier,
+    "vec3(",
+    Ok(("(", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    function_identifier,
+    "vec3 (",
+    Ok(("(", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    function_identifier,
+    "vec3\t\n\n \t (",
+    Ok(("(", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_function_identifier_cast_array_unsized() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::FunIdentifier::Expr(Box::new(syntax::Expr::Bracket(
     Box::new(syntax::Expr::Variable("vec3".into())),
     syntax::ArraySpecifier {
@@ -1863,12 +2343,24 @@ fn parse_function_identifier_cast_array_unsized() {
     },
   )));
 
-  assert_eq_parser(function_identifier, "vec3[](", Ok(("(", expected.clone())));
-  assert_eq_parser(function_identifier, "vec3  [\t\n](", Ok(("(", expected)));
+  assert_eq_parser(
+    function_identifier,
+    "vec3[](",
+    Ok(("(", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    function_identifier,
+    "vec3  [\t\n](",
+    Ok(("(", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_function_identifier_cast_array_sized() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::FunIdentifier::Expr(Box::new(syntax::Expr::Bracket(
     Box::new(syntax::Expr::Variable("vec3".into())),
     syntax::ArraySpecifier {
@@ -1882,93 +2374,189 @@ fn parse_function_identifier_cast_array_sized() {
     function_identifier,
     "vec3[12](",
     Ok(("(", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser(function_identifier, "vec3  [\t 12\n](", Ok(("(", expected)));
+  assert_eq_parser(
+    function_identifier,
+    "vec3  [\t 12\n](",
+    Ok(("(", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_void() {
-  assert_eq_parser(void, "void ", Ok((" ", ())));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(void, "void ", Ok((" ", ())), &ctx);
 }
 
 #[test]
 fn parse_assignment_op_equal() {
-  assert_eq_parser(assignment_op, "= ", Ok((" ", syntax::AssignmentOp::Equal)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "= ",
+    Ok((" ", syntax::AssignmentOp::Equal)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_mult() {
-  assert_eq_parser(assignment_op, "*= ", Ok((" ", syntax::AssignmentOp::Mult)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "*= ",
+    Ok((" ", syntax::AssignmentOp::Mult)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_div() {
-  assert_eq_parser(assignment_op, "/= ", Ok((" ", syntax::AssignmentOp::Div)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "/= ",
+    Ok((" ", syntax::AssignmentOp::Div)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_mod() {
-  assert_eq_parser(assignment_op, "%= ", Ok((" ", syntax::AssignmentOp::Mod)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "%= ",
+    Ok((" ", syntax::AssignmentOp::Mod)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_add() {
-  assert_eq_parser(assignment_op, "+= ", Ok((" ", syntax::AssignmentOp::Add)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "+= ",
+    Ok((" ", syntax::AssignmentOp::Add)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_sub() {
-  assert_eq_parser(assignment_op, "-= ", Ok((" ", syntax::AssignmentOp::Sub)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "-= ",
+    Ok((" ", syntax::AssignmentOp::Sub)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_lshift() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     assignment_op,
     "<<= ",
     Ok((" ", syntax::AssignmentOp::LShift)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_assignment_op_rshift() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     assignment_op,
     ">>= ",
     Ok((" ", syntax::AssignmentOp::RShift)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_assignment_op_and() {
-  assert_eq_parser(assignment_op, "&= ", Ok((" ", syntax::AssignmentOp::And)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "&= ",
+    Ok((" ", syntax::AssignmentOp::And)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_xor() {
-  assert_eq_parser(assignment_op, "^= ", Ok((" ", syntax::AssignmentOp::Xor)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "^= ",
+    Ok((" ", syntax::AssignmentOp::Xor)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_assignment_op_or() {
-  assert_eq_parser(assignment_op, "|= ", Ok((" ", syntax::AssignmentOp::Or)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    assignment_op,
+    "|= ",
+    Ok((" ", syntax::AssignmentOp::Or)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_expr_statement() {
+  let ctx = ParseContext::new();
+
   let expected = Some(syntax::Expr::Assignment(
     Box::new(syntax::Expr::Variable("foo".into())),
     syntax::AssignmentOp::Equal,
     Box::new(syntax::Expr::FloatConst(314.)),
   ));
 
-  assert_eq_parser(expr_statement, "foo = 314.f;", Ok(("", expected.clone())));
-  assert_eq_parser(expr_statement, "foo=314.f;", Ok(("", expected.clone())));
-  assert_eq_parser(expr_statement, "foo\n\t=  \n314.f;", Ok(("", expected)));
+  assert_eq_parser(
+    expr_statement,
+    "foo = 314.f;",
+    Ok(("", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    expr_statement,
+    "foo=314.f;",
+    Ok(("", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    expr_statement,
+    "foo\n\t=  \n314.f;",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_declaration_function_prototype() {
+  let ctx = ParseContext::new();
+
   let rt = syntax::FullySpecifiedType {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -2006,21 +2594,26 @@ fn parse_declaration_function_prototype() {
     declaration,
     "vec3 foo(vec2, out float the_arg);",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     declaration,
     "vec3 \nfoo ( vec2\n, out float \n\tthe_arg )\n;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     declaration,
     "vec3 foo(vec2,out float the_arg);",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_declaration_init_declarator_list_single() {
+  let ctx = ParseContext::new();
+
   let ty = syntax::FullySpecifiedType {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -2042,13 +2635,25 @@ fn parse_declaration_init_declarator_list_single() {
   };
   let expected = syntax::Declaration::InitDeclaratorList(idl);
 
-  assert_eq_parser_1(declaration, "int foo = 34;", Ok(("", expected.clone())));
-  assert_eq_parser_1(declaration, "int foo=34;", Ok(("", expected.clone())));
-  assert_eq_parser_1(declaration, "int    \t  \nfoo =\t34  ;", Ok(("", expected)));
+  assert_eq_parser_1(
+    declaration,
+    "int foo = 34;",
+    Ok(("", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser_1(declaration, "int foo=34;", Ok(("", expected.clone())), &ctx);
+  assert_eq_parser_1(
+    declaration,
+    "int    \t  \nfoo =\t34  ;",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_declaration_init_declarator_list_complex() {
+  let ctx = ParseContext::new();
+
   let ty = syntax::FullySpecifiedType {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -2079,21 +2684,26 @@ fn parse_declaration_init_declarator_list_complex() {
     declaration,
     "int foo = 34, bar = 12;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     declaration,
     "int foo=34,bar=12;",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     declaration,
     "int    \t  \nfoo =\t34 \n,\tbar=      12\n ;",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_declaration_precision_low() {
+  let ctx = ParseContext::new();
+
   let qual = syntax::PrecisionQualifier::Low;
   let ty = syntax::TypeSpecifier {
     ty: syntax::TypeSpecifierNonArray::Float,
@@ -2101,11 +2711,18 @@ fn parse_declaration_precision_low() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser_1(declaration, "precision lowp float;", Ok(("", expected)));
+  assert_eq_parser_1(
+    declaration,
+    "precision lowp float;",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_declaration_precision_medium() {
+  let ctx = ParseContext::new();
+
   let qual = syntax::PrecisionQualifier::Medium;
   let ty = syntax::TypeSpecifier {
     ty: syntax::TypeSpecifierNonArray::Float,
@@ -2113,11 +2730,18 @@ fn parse_declaration_precision_medium() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser_1(declaration, "precision mediump float;", Ok(("", expected)));
+  assert_eq_parser_1(
+    declaration,
+    "precision mediump float;",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_declaration_precision_high() {
+  let ctx = ParseContext::new();
+
   let qual = syntax::PrecisionQualifier::High;
   let ty = syntax::TypeSpecifier {
     ty: syntax::TypeSpecifierNonArray::Float,
@@ -2125,11 +2749,18 @@ fn parse_declaration_precision_high() {
   };
   let expected = syntax::Declaration::Precision(qual, ty);
 
-  assert_eq_parser_1(declaration, "precision highp float;", Ok(("", expected)));
+  assert_eq_parser_1(
+    declaration,
+    "precision highp float;",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_declaration_uniform_block() {
+  let ctx = ParseContext::new();
+
   let qual_spec = syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Uniform);
   let qual = syntax::TypeQualifier {
     qualifiers: syntax::NonEmpty(vec![qual_spec]),
@@ -2169,12 +2800,15 @@ fn parse_declaration_uniform_block() {
     declaration,
     "uniform UniformBlockTest { float a; vec3 b; foo c, d; };",
     Ok(("", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser_1(declaration, "uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_declaration_buffer_block() {
+  let ctx = ParseContext::new();
+
   let qual_spec = syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Buffer);
   let qual = syntax::TypeQualifier {
     qualifiers: syntax::NonEmpty(vec![qual_spec]),
@@ -2219,12 +2853,15 @@ fn parse_declaration_buffer_block() {
     declaration,
     "buffer UniformBlockTest { float a; vec3 b[]; foo c, d; };",
     Ok(("", expected.clone())),
+    &ctx,
   );
-  assert_eq_parser_1(declaration, "buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)));
+  assert_eq_parser_1(declaration, "buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_selection_statement_if() {
+  let ctx = ParseContext::new();
+
   let cond = syntax::Expr::Binary(
     syntax::BinaryOp::LT,
     Box::new(syntax::Expr::Variable("foo".into())),
@@ -2247,16 +2884,20 @@ fn parse_selection_statement_if() {
     selection_statement,
     "if (foo < 10) { return false; }K",
     Ok(("K", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     selection_statement,
     "if \n(foo<10\n) \t{return false;}K",
     Ok(("K", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_selection_statement_if_else() {
+  let ctx = ParseContext::new();
+
   let cond = syntax::Expr::Binary(
     syntax::BinaryOp::LT,
     Box::new(syntax::Expr::Variable("foo".into())),
@@ -2286,16 +2927,20 @@ fn parse_selection_statement_if_else() {
     selection_statement,
     "if (foo < 10) { return 0.f; } else { return foo; }",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     selection_statement,
     "if \n(foo<10\n) \t{return 0.f\t;\n\n}\n else{\n\t return foo   ;}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_switch_statement_empty() {
+  let ctx = ParseContext::new();
+
   let head = Box::new(syntax::Expr::Variable("foo".into()));
   let expected = syntax::SwitchStatement {
     head,
@@ -2306,21 +2951,26 @@ fn parse_switch_statement_empty() {
     switch_statement,
     "switch (foo) {}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     switch_statement,
     "switch(foo){}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     switch_statement,
     "switch\n\n (  foo  \t   \n) { \n\n   }",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_switch_statement_cases() {
+  let ctx = ParseContext::new();
+
   let head = Box::new(syntax::Expr::Variable("foo".into()));
   let case0 = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::CaseLabel(
     syntax::CaseLabel::Case(Box::new(syntax::Expr::IntConst(0))),
@@ -2340,25 +2990,42 @@ fn parse_switch_statement_cases() {
     switch_statement,
     "switch (foo) { case 0: case 1: return 12u; }",
     Ok(("", expected.clone())),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_case_label_def() {
-  assert_eq_parser(case_label, "default:", Ok(("", syntax::CaseLabel::Def)));
-  assert_eq_parser(case_label, "default   :", Ok(("", syntax::CaseLabel::Def)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(
+    case_label,
+    "default:",
+    Ok(("", syntax::CaseLabel::Def)),
+    &ctx,
+  );
+  assert_eq_parser(
+    case_label,
+    "default   :",
+    Ok(("", syntax::CaseLabel::Def)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_case_label() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::CaseLabel::Case(Box::new(syntax::Expr::IntConst(3)));
 
-  assert_eq_parser(case_label, "case 3:", Ok(("", expected.clone())));
-  assert_eq_parser(case_label, "case\n\t 3   :", Ok(("", expected)));
+  assert_eq_parser(case_label, "case 3:", Ok(("", expected.clone())), &ctx);
+  assert_eq_parser(case_label, "case\n\t 3   :", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_iteration_statement_while_empty() {
+  let ctx = ParseContext::new();
+
   let cond = syntax::Condition::Expr(Box::new(syntax::Expr::Binary(
     syntax::BinaryOp::GTE,
     Box::new(syntax::Expr::Variable("a".into())),
@@ -2373,21 +3040,26 @@ fn parse_iteration_statement_while_empty() {
     iteration_statement,
     "while (a >= b) {}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "while(a>=b){}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "while (  a >=\n\tb  )\t  {   \n}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_iteration_statement_do_while_empty() {
+  let ctx = ParseContext::new();
+
   let st = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
     statement_list: Vec::new(),
   }));
@@ -2402,21 +3074,26 @@ fn parse_iteration_statement_do_while_empty() {
     iteration_statement,
     "do {} while (a >= b);",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "do{}while(a>=b);",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "do \n {\n} while (  a >=\n\tb  )\t  \n;",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_iteration_statement_for_empty() {
+  let ctx = ParseContext::new();
+
   let init = syntax::ForInitStatement::Declaration(Box::new(
     syntax::Declaration::InitDeclaratorList(syntax::InitDeclaratorList {
       head: syntax::SingleDeclaration {
@@ -2456,77 +3133,99 @@ fn parse_iteration_statement_for_empty() {
     iteration_statement,
     "for (float i = 0.f; i <= 10.f; ++i) {}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "for(float i=0.f;i<=10.f;++i){}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     iteration_statement,
     "for\n\t (  \t\n\nfloat \ni \t=\n0.f\n;\ni\t<=  10.f; \n++i\n)\n{\n}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_jump_continue() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     jump_statement,
     "continue;",
     Ok(("", syntax::JumpStatement::Continue)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_jump_break() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     jump_statement,
     "break;",
     Ok(("", syntax::JumpStatement::Break)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_jump_return() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::JumpStatement::Return(Some(Box::new(syntax::Expr::IntConst(3))));
-  assert_eq_parser(jump_statement, "return 3;", Ok(("", expected)));
+  assert_eq_parser(jump_statement, "return 3;", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_jump_empty_return() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::SimpleStatement::Jump(syntax::JumpStatement::Return(None));
-  assert_eq_parser(simple_statement, "return;", Ok(("", expected)));
+  assert_eq_parser(simple_statement, "return;", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_jump_discard() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     jump_statement,
     "discard;",
     Ok(("", syntax::JumpStatement::Discard)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_simple_statement_return() {
+  let ctx = ParseContext::new();
+
   let e = syntax::Expr::BoolConst(false);
   let expected = syntax::SimpleStatement::Jump(syntax::JumpStatement::Return(Some(Box::new(e))));
 
-  assert_eq_parser(simple_statement, "return false;", Ok(("", expected)));
+  assert_eq_parser(simple_statement, "return false;", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_compound_statement_empty() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::CompoundStatement {
     statement_list: Vec::new(),
   };
 
-  assert_eq_parser(compound_statement, "{}", Ok(("", expected)));
+  assert_eq_parser(compound_statement, "{}", Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_compound_statement() {
+  let ctx = ParseContext::new();
+
   let st0 = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Selection(
     syntax::SelectionStatement {
       cond: Box::new(syntax::Expr::BoolConst(true)),
@@ -2565,16 +3264,20 @@ fn parse_compound_statement() {
     compound_statement,
     "{ if (true) {} isampler3D x; return 42 ; }",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser(
     compound_statement,
     "{if(true){}isampler3D x;return 42;}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_function_definition() {
+  let ctx = ParseContext::new();
+
   let rt = syntax::FullySpecifiedType {
     qualifier: None,
     ty: syntax::TypeSpecifier {
@@ -2601,21 +3304,26 @@ fn parse_function_definition() {
     function_definition,
     "iimage2DArray foo() { return bar; }",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     function_definition,
     "iimage2DArray \tfoo\n()\n \n{\n return \nbar\n;}",
     Ok(("", expected.clone())),
+    &ctx,
   );
   assert_eq_parser_1(
     function_definition,
     "iimage2DArray foo(){return bar;}",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_buffer_block_0() {
+  let ctx = ParseContext::new();
+
   let src = include_str!("../data/tests/buffer_block_0.glsl");
   let main_fn = syntax::Node {
     contents: syntax::ExternalDeclaration::FunctionDefinition(syntax::FunctionDefinition {
@@ -2673,11 +3381,13 @@ fn parse_buffer_block_0() {
 
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![buffer_block, main_fn]));
 
-  assert_eq_parser(translation_unit, src, Ok(("", expected)));
+  assert_eq_parser(translation_unit, src, Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_layout_buffer_block_0() {
+  let ctx = ParseContext::new();
+
   let src = include_str!("../data/tests/layout_buffer_block_0.glsl");
   let layout = syntax::LayoutQualifier {
     ids: syntax::NonEmpty(vec![
@@ -2720,41 +3430,52 @@ fn parse_layout_buffer_block_0() {
 
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![block]));
 
-  assert_eq_parser(translation_unit, src, Ok(("", expected)));
+  assert_eq_parser(translation_unit, src, Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_pp_space0() {
-  assert_eq_parser_str(pp_space0, "   \\\n  ", Ok(("", "   \\\n  ")));
-  assert_eq_parser_str(pp_space0, "", Ok(("", "")));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser_str(pp_space0, "   \\\n  ", Ok(("", "   \\\n  ")), &ctx);
+  assert_eq_parser_str(pp_space0, "", Ok(("", "")), &ctx);
 }
 
 #[test]
 fn parse_pp_version_number() {
-  assert_eq_parser(pp_version_number, "450", Ok(("", 450)));
+  let ctx = ParseContext::new();
+
+  assert_eq_parser(pp_version_number, "450", Ok(("", 450)), &ctx);
 }
 
 #[test]
 fn parse_pp_version_profile() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     pp_version_profile,
     "core",
     Ok(("", syntax::PreprocessorVersionProfile::Core)),
+    &ctx,
   );
   assert_eq_parser(
     pp_version_profile,
     "compatibility",
     Ok(("", syntax::PreprocessorVersionProfile::Compatibility)),
+    &ctx,
   );
   assert_eq_parser(
     pp_version_profile,
     "es",
     Ok(("", syntax::PreprocessorVersionProfile::ES)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_version() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#version 450\n",
@@ -2765,6 +3486,7 @@ fn parse_pp_version() {
         profile: None,
       }),
     )),
+    &ctx,
   );
 
   assert_eq_parser_1(
@@ -2777,11 +3499,14 @@ fn parse_pp_version() {
         profile: Some(syntax::PreprocessorVersionProfile::Core),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_version_newline() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#version 450\n",
@@ -2792,6 +3517,7 @@ fn parse_pp_version_newline() {
         profile: None,
       }),
     )),
+    &ctx,
   );
 
   assert_eq_parser_1(
@@ -2804,11 +3530,14 @@ fn parse_pp_version_newline() {
         profile: Some(syntax::PreprocessorVersionProfile::Core),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_define() {
+  let ctx = ParseContext::new();
+
   let expect = |v: &str| {
     Ok((
       "",
@@ -2819,9 +3548,9 @@ fn parse_pp_define() {
     ))
   };
 
-  assert_eq_parser_1(preprocessor, "#define test 1.0", expect("1.0"));
-  assert_eq_parser_1(preprocessor, "#define test \\\n   1.0", expect("1.0"));
-  assert_eq_parser_1(preprocessor, "#define test 1.0\n", expect("1.0"));
+  assert_eq_parser_1(preprocessor, "#define test 1.0", expect("1.0"), &ctx);
+  assert_eq_parser_1(preprocessor, "#define test \\\n   1.0", expect("1.0"), &ctx);
+  assert_eq_parser_1(preprocessor, "#define test 1.0\n", expect("1.0"), &ctx);
 
   assert_eq_parser_1(
     preprocessor,
@@ -2833,6 +3562,7 @@ fn parse_pp_define() {
         value: ".0f".to_owned(),
       }),
     )),
+    &ctx,
   );
 
   assert_eq_parser_1(
@@ -2845,11 +3575,14 @@ fn parse_pp_define() {
         value: "1".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_define_with_args() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::Preprocessor::Define(syntax::PreprocessorDefine::FunctionLike {
     ident: "add".into(),
     args: vec![
@@ -2863,17 +3596,21 @@ fn parse_pp_define_with_args() {
     preprocessor,
     "#define \\\n add(x, y) \\\n (x + y)",
     Ok(("", expected.clone())),
+    &ctx,
   );
 
   assert_eq_parser_1(
     preprocessor,
     "#define \\\n add(  x, y  ) \\\n (x + y)",
     Ok(("", expected)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_define_multiline() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     r#"#define foo \
@@ -2885,20 +3622,26 @@ fn parse_pp_define_multiline() {
         value: "32".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_else() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#    else\n",
     Ok(("", syntax::Preprocessor::Else)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_elseif() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#   elseif \\\n42\n",
@@ -2908,20 +3651,26 @@ fn parse_pp_elseif() {
         condition: "42".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_endif() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#\\\nendif",
     Ok(("", syntax::Preprocessor::EndIf)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_error() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#error \\\n     some message",
@@ -2931,11 +3680,14 @@ fn parse_pp_error() {
         message: "some message".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_if() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "# \\\nif 42",
@@ -2945,11 +3697,14 @@ fn parse_pp_if() {
         condition: "42".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_ifdef() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#ifdef       FOO\n",
@@ -2959,11 +3714,14 @@ fn parse_pp_ifdef() {
         ident: syntax::Identifier("FOO".to_owned()),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_ifndef() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#\\\nifndef \\\n   FOO\n",
@@ -2973,11 +3731,14 @@ fn parse_pp_ifndef() {
         ident: syntax::Identifier("FOO".to_owned()),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_include() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#include <filename>\n",
@@ -2987,6 +3748,7 @@ fn parse_pp_include() {
         path: syntax::Path::Absolute("filename".to_owned()),
       }),
     )),
+    &ctx,
   );
 
   assert_eq_parser_1(
@@ -2998,11 +3760,14 @@ fn parse_pp_include() {
         path: syntax::Path::Relative("filename".to_owned()),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_line() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#   line \\\n2\n",
@@ -3013,6 +3778,7 @@ fn parse_pp_line() {
         source_string_number: None,
       }),
     )),
+    &ctx,
   );
 
   assert_eq_parser_1(
@@ -3025,11 +3791,14 @@ fn parse_pp_line() {
         source_string_number: Some(4),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_pragma() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#\\\npragma  some   flag",
@@ -3039,11 +3808,14 @@ fn parse_pp_pragma() {
         command: "some   flag".to_owned(),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_undef() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "# undef \\\n FOO",
@@ -3053,15 +3825,19 @@ fn parse_pp_undef() {
         name: syntax::Identifier("FOO".to_owned()),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_extension_name() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     pp_extension_name,
     "all",
     Ok(("", syntax::PreprocessorExtensionName::All)),
+    &ctx,
   );
   assert_eq_parser(
     pp_extension_name,
@@ -3070,35 +3846,44 @@ fn parse_pp_extension_name() {
       " ",
       syntax::PreprocessorExtensionName::Specific("GL_foobar_extension".to_owned()),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_extension_behavior() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser(
     pp_extension_behavior,
     "require",
     Ok(("", syntax::PreprocessorExtensionBehavior::Require)),
+    &ctx,
   );
   assert_eq_parser(
     pp_extension_behavior,
     "enable",
     Ok(("", syntax::PreprocessorExtensionBehavior::Enable)),
+    &ctx,
   );
   assert_eq_parser(
     pp_extension_behavior,
     "warn",
     Ok(("", syntax::PreprocessorExtensionBehavior::Warn)),
+    &ctx,
   );
   assert_eq_parser(
     pp_extension_behavior,
     "disable",
     Ok(("", syntax::PreprocessorExtensionBehavior::Disable)),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_pp_extension() {
+  let ctx = ParseContext::new();
+
   assert_eq_parser_1(
     preprocessor,
     "#extension all: require\n",
@@ -3109,11 +3894,14 @@ fn parse_pp_extension() {
         behavior: Some(syntax::PreprocessorExtensionBehavior::Require),
       }),
     )),
+    &ctx,
   );
 }
 
 #[test]
 fn parse_dot_field_expr_array() {
+  let ctx = ParseContext::new();
+
   let src = "a[0].xyz;";
   let expected = syntax::Expr::Dot(
     Box::new(syntax::Expr::Bracket(
@@ -3127,11 +3915,13 @@ fn parse_dot_field_expr_array() {
     "xyz".into(),
   );
 
-  assert_eq_parser(expr, src, Ok((";", expected)));
+  assert_eq_parser(expr, src, Ok((";", expected)), &ctx);
 }
 
 #[test]
 fn parse_dot_field_expr_statement() {
+  let ctx = ParseContext::new();
+
   let src = "vec3 v = smoothstep(vec3(border_width), vec3(0.0), v_barycenter).zyx;";
   let fun = syntax::FunIdentifier::Identifier("smoothstep".into());
   let args = vec![
@@ -3168,11 +3958,13 @@ fn parse_dot_field_expr_statement() {
     }),
   )));
 
-  assert_eq_parser(statement, src, Ok(("", expected)));
+  assert_eq_parser(statement, src, Ok(("", expected)), &ctx);
 }
 
 #[test]
 fn parse_arrayed_identifier() {
+  let ctx = ParseContext::new();
+
   let expected = syntax::ArrayedIdentifier::new(
     "foo",
     syntax::ArraySpecifier {
@@ -3180,14 +3972,28 @@ fn parse_arrayed_identifier() {
     },
   );
 
-  assert_eq_parser(arrayed_identifier, "foo[]", Ok(("", expected.clone())));
-  assert_eq_parser(arrayed_identifier, "foo \t\n  [\n\t ]", Ok(("", expected)));
+  assert_eq_parser(
+    arrayed_identifier,
+    "foo[]",
+    Ok(("", expected.clone())),
+    &ctx,
+  );
+  assert_eq_parser(
+    arrayed_identifier,
+    "foo \t\n  [\n\t ]",
+    Ok(("", expected)),
+    &ctx,
+  );
 }
 
 #[test]
 fn parse_nested_parens() {
   let start = std::time::Instant::now();
-  parens_expr(LocatedSpan::new("((((((((1.0f))))))))")).unwrap();
+  parens_expr(ParseInput::new(
+    "((((((((1.0f))))))))",
+    &ParseContext::new(),
+  ))
+  .unwrap();
   let elapsed = start.elapsed();
   assert!(elapsed.as_millis() < 100, "{} ms", elapsed.as_millis());
 }

@@ -7,6 +7,9 @@
 
 mod nom_helpers;
 
+mod parse_input;
+pub use parse_input::*;
+
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until, take_while1};
 use nom::character::complete::{anychar, char, digit1, space0, space1};
@@ -19,7 +22,7 @@ use nom::{Err as NomErr, ParseTo};
 use std::num::ParseIntError;
 
 use nom::{AsBytes, Slice};
-use nom_locate::{position, LocatedSpan};
+use nom_locate::position;
 
 pub use self::nom_helpers::ParserResult;
 use self::nom_helpers::{blank_space, cnst, eol, many0_, str_till_eol};
@@ -48,9 +51,9 @@ macro_rules! parse_located {
 }
 
 // Parse a keyword. A keyword is just a regular string that must be followed by punctuation.
-fn keyword<'a>(
-  kwd: &'a str,
-) -> impl Fn(LocatedSpan<&'a str>) -> ParserResult<'a, LocatedSpan<&'a str>> {
+fn keyword<'d, 'c: 'd>(
+  kwd: &'c str,
+) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   terminated(
     tag(kwd),
     not(verify(peek(anychar), |&c| identifier_pred(c))),
@@ -58,70 +61,87 @@ fn keyword<'a>(
 }
 
 /// Parse a single comment.
-pub fn comment(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   preceded(
     char('/'),
     alt((
-      preceded(char('/'), cut(str_till_eol)),
-      preceded(char('*'), cut(terminated(take_until("*/"), tag("*/")))),
+      preceded(
+        char('/'),
+        cut(map(str_till_eol, |i| {
+          i.context.add_comment(|| syntax::Comment::new_single(i));
+          i
+        })),
+      ),
+      preceded(
+        char('*'),
+        cut(map(
+          terminated(take_until("*/"), tag("*/")),
+          |i: ParseInput<'c, 'd>| {
+            i.context.add_comment(|| syntax::Comment::new_multi(i));
+            i
+          },
+        )),
+      ),
     )),
   )(i)
 }
 
 /// Parse several comments.
-pub fn comments(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+pub fn comments<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   recognize(many0_(terminated(comment, blank_space)))(i)
 }
 
 /// In-between token parser (spaces and comments).
 ///
 /// This parser also allows to break a line into two by finishing the line with a backslack ('\').
-fn blank(i: LocatedSpan<&str>) -> ParserResult<()> {
+fn blank<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   value((), preceded(blank_space, comments))(i)
 }
 
 #[inline]
-fn identifier_pred(ch: char) -> bool {
+fn identifier_pred<'d, 'c: 'd>(ch: char) -> bool {
   ch.is_alphanumeric() || ch == '_'
 }
 
 #[inline]
-fn verify_identifier(s: &LocatedSpan<&str>) -> bool {
+fn verify_identifier<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
   !char::from(s.as_bytes()[0]).is_digit(10)
 }
 
 /// Parse an identifier (raw version).
-fn identifier_str(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+fn identifier_str<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   verify(take_while1(identifier_pred), verify_identifier)(i)
 }
 
 /// Parse a string that could be used as an identifier.
-pub fn string(i: LocatedSpan<&str>) -> ParserResult<String> {
+pub fn string<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
   map(identifier_str, |s| s.to_string())(i)
 }
 
 /// Parse an identifier.
-pub fn identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::Identifier> {
+pub fn identifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Identifier> {
   map(string, syntax::Identifier)(i)
 }
 
 /// Parse a type name.
-pub fn type_name(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeName> {
+pub fn type_name<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::TypeName> {
   map(string, syntax::TypeName)(i)
 }
 
 /// Parse a non-empty list of type names, delimited by comma (,).
-fn nonempty_type_names(i: LocatedSpan<&str>) -> ParserResult<Vec<syntax::TypeName>> {
+fn nonempty_type_names<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Vec<syntax::TypeName>> {
   separated_list(terminated(char(','), blank), terminated(type_name, blank))(i)
 }
 
 /// Parse a type specifier non struct.
-pub fn type_specifier_non_struct(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::TypeSpecifierNonArray> {
+pub fn type_specifier_non_struct<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TypeSpecifierNonArray> {
   let (i1, t) = identifier_str(i)?;
 
-  match *t.fragment() {
+  match t.fragment() {
     "void" => Ok((i1, syntax::TypeSpecifierNonArray::Void)),
     "bool" => Ok((i1, syntax::TypeSpecifierNonArray::Bool)),
     "int" => Ok((i1, syntax::TypeSpecifierNonArray::Int)),
@@ -252,9 +272,9 @@ pub fn type_specifier_non_struct(
 }
 
 /// Parse a type specifier (non-array version).
-pub fn type_specifier_non_array(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::TypeSpecifierNonArray> {
+pub fn type_specifier_non_array<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TypeSpecifierNonArray> {
   alt((
     type_specifier_non_struct,
     map(struct_specifier, syntax::TypeSpecifierNonArray::Struct),
@@ -263,7 +283,9 @@ pub fn type_specifier_non_array(
 }
 
 /// Parse a type specifier.
-pub fn type_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeSpecifier> {
+pub fn type_specifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TypeSpecifier> {
   map(
     pair(
       type_specifier_non_array,
@@ -277,51 +299,59 @@ pub fn type_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeSpecifie
 }
 
 /// Parse the void type.
-pub fn void(i: LocatedSpan<&str>) -> ParserResult<()> {
+pub fn void<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   value((), keyword("void"))(i)
 }
 
 /// Parse a digit that precludes a leading 0.
-pub(crate) fn nonzero_digits(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
-  verify(digit1, |s: &LocatedSpan<&str>| s.as_bytes()[0] != b'0')(i)
+pub(crate) fn nonzero_digits<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+  verify(digit1, |s: &ParseInput<'c, 'd>| s.as_bytes()[0] != b'0')(i)
 }
 
 #[inline]
-fn is_octal(s: &LocatedSpan<&str>) -> bool {
+fn is_octal<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
   s.as_bytes()[0] == b'0' && s.as_bytes().iter().cloned().all(is_oct_digit)
 }
 
 #[inline]
-fn all_hexa(s: &LocatedSpan<&str>) -> bool {
+fn all_hexa<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
   s.as_bytes().iter().cloned().all(is_hex_digit)
 }
 
 #[inline]
-fn alphanumeric_no_u(c: char) -> bool {
+fn alphanumeric_no_u<'d, 'c: 'd>(c: char) -> bool {
   c.is_alphanumeric() && c != 'u' && c != 'U'
 }
 
 /// Parse an hexadecimal literal.
-pub(crate) fn hexadecimal_lit(i: LocatedSpan<&str>) -> ParserResult<Result<u32, ParseIntError>> {
+pub(crate) fn hexadecimal_lit<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
   preceded(
     preceded(char('0'), cut(alt((char('x'), char('X'))))), // 0x | 0X
     cut(map(
       verify(take_while1(alphanumeric_no_u), all_hexa),
-      |i: LocatedSpan<&str>| u32::from_str_radix(i.fragment(), 16),
+      |i: ParseInput<'c, 'd>| u32::from_str_radix(i.fragment(), 16),
     )),
   )(i)
 }
 
 /// Parse an octal literal.
-pub(crate) fn octal_lit(i: LocatedSpan<&str>) -> ParserResult<Result<u32, ParseIntError>> {
+pub(crate) fn octal_lit<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
   map(
     verify(take_while1(alphanumeric_no_u), is_octal),
-    |i: LocatedSpan<&str>| u32::from_str_radix(i.fragment(), 8),
+    |i: ParseInput<'c, 'd>| u32::from_str_radix(i.fragment(), 8),
   )(i)
 }
 
 /// Parse a decimal literal.
-pub(crate) fn decimal_lit(i: LocatedSpan<&str>) -> ParserResult<Result<u32, ParseIntError>> {
+pub(crate) fn decimal_lit<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
   map(nonzero_digits, |i| i.fragment().parse())(i)
 }
 
@@ -344,7 +374,9 @@ pub(crate) fn decimal_lit(i: LocatedSpan<&str>) -> ParserResult<Result<u32, Pars
 /// > bit pattern cannot fit in 32 bits. The bit pattern of the
 /// > literal is always used unmodified. So a signed literal whose
 /// > bit pattern includes a set sign bit creates a negative value.
-pub fn integral_lit_try(i: LocatedSpan<&str>) -> ParserResult<Result<i32, ParseIntError>> {
+pub fn integral_lit_try<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Result<i32, ParseIntError>> {
   let (i, sign) = opt(char('-'))(i)?;
 
   map(alt((octal_lit, hexadecimal_lit, decimal_lit)), move |lit| {
@@ -360,7 +392,7 @@ pub fn integral_lit_try(i: LocatedSpan<&str>) -> ParserResult<Result<i32, ParseI
   })(i)
 }
 
-pub fn integral_lit(i: LocatedSpan<&str>) -> ParserResult<i32> {
+pub fn integral_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, i32> {
   match integral_lit_try(i) {
     Ok((i, v)) => match v {
       Ok(v) => Ok((i, v)),
@@ -377,27 +409,27 @@ pub fn integral_lit(i: LocatedSpan<&str>) -> ParserResult<i32> {
 }
 
 /// Parse the unsigned suffix.
-pub(crate) fn unsigned_suffix(i: LocatedSpan<&str>) -> ParserResult<char> {
+pub(crate) fn unsigned_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, char> {
   alt((char('u'), char('U')))(i)
 }
 
 /// Parse a literal unsigned string.
-pub fn unsigned_lit(i: LocatedSpan<&str>) -> ParserResult<u32> {
+pub fn unsigned_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, u32> {
   map(terminated(integral_lit, unsigned_suffix), |lit| lit as u32)(i)
 }
 
 /// Parse a floating point suffix.
-fn float_suffix(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+fn float_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   alt((keyword("f"), keyword("F")))(i)
 }
 
 /// Parse a double point suffix.
-fn double_suffix(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+fn double_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   alt((keyword("lf"), keyword("LF")))(i)
 }
 
 /// Parse the exponent part of a floating point literal.
-fn floating_exponent(i: LocatedSpan<&str>) -> ParserResult<()> {
+fn floating_exponent<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   value(
     (),
     preceded(
@@ -408,7 +440,7 @@ fn floating_exponent(i: LocatedSpan<&str>) -> ParserResult<()> {
 }
 
 /// Parse the fractional constant part of a floating point literal.
-fn floating_frac(i: LocatedSpan<&str>) -> ParserResult<()> {
+fn floating_frac<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   alt((
     value((), preceded(char('.'), digit1)),
     value((), delimited(digit1, char('.'), opt(digit1))),
@@ -416,7 +448,7 @@ fn floating_frac(i: LocatedSpan<&str>) -> ParserResult<()> {
 }
 
 /// Parse the « middle » part of a floating value – i.e. fractional and exponential parts.
-fn floating_middle(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+fn floating_middle<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   recognize(alt((
     value((), preceded(floating_frac, opt(floating_exponent))),
     value((), preceded(nonzero_digits, floating_exponent)),
@@ -424,7 +456,7 @@ fn floating_middle(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
 }
 
 /// Parse a float literal string.
-pub fn float_lit(i: LocatedSpan<&str>) -> ParserResult<f32> {
+pub fn float_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f32> {
   let (i, (sign, f)) = tuple((
     opt(char('-')),
     terminated(floating_middle, pair(opt(float_suffix), not(double_suffix))),
@@ -446,7 +478,7 @@ pub fn float_lit(i: LocatedSpan<&str>) -> ParserResult<f32> {
 }
 
 /// Parse a double literal string.
-pub fn double_lit(i: LocatedSpan<&str>) -> ParserResult<f64> {
+pub fn double_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f64> {
   let (i, (sign, f)) = tuple((
     opt(char('-')),
     terminated(floating_middle, pair(not(float_suffix), opt(double_suffix))),
@@ -467,12 +499,12 @@ pub fn double_lit(i: LocatedSpan<&str>) -> ParserResult<f64> {
 }
 
 /// Parse a constant boolean.
-pub fn bool_lit(i: LocatedSpan<&str>) -> ParserResult<bool> {
+pub fn bool_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, bool> {
   alt((value(true, keyword("true")), value(false, keyword("false"))))(i)
 }
 
 /// Parse a path literal.
-pub fn path_lit(i: LocatedSpan<&str>) -> ParserResult<syntax::Path> {
+pub fn path_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Path> {
   alt((
     map(path_lit_absolute, syntax::Path::Absolute),
     map(path_lit_relative, syntax::Path::Relative),
@@ -480,23 +512,23 @@ pub fn path_lit(i: LocatedSpan<&str>) -> ParserResult<syntax::Path> {
 }
 
 /// Parse a path literal with angle brackets.
-pub fn path_lit_absolute(i: LocatedSpan<&str>) -> ParserResult<String> {
+pub fn path_lit_absolute<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
   map(
     delimited(char('<'), cut(take_until(">")), cut(char('>'))),
-    |s: LocatedSpan<&str>| s.to_string(),
+    |s: ParseInput<'c, 'd>| s.to_string(),
   )(i)
 }
 
 /// Parse a path literal with double quotes.
-pub fn path_lit_relative(i: LocatedSpan<&str>) -> ParserResult<String> {
+pub fn path_lit_relative<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
   map(
     delimited(char('"'), cut(take_until("\"")), cut(char('"'))),
-    |s: LocatedSpan<&str>| s.to_string(),
+    |s: ParseInput<'c, 'd>| s.to_string(),
   )(i)
 }
 
 /// Parse a unary operator.
-pub fn unary_op(i: LocatedSpan<&str>) -> ParserResult<syntax::UnaryOp> {
+pub fn unary_op<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::UnaryOp> {
   alt((
     value(syntax::UnaryOp::Inc, tag("++")),
     value(syntax::UnaryOp::Dec, tag("--")),
@@ -508,7 +540,9 @@ pub fn unary_op(i: LocatedSpan<&str>) -> ParserResult<syntax::UnaryOp> {
 }
 
 /// Parse an identifier with an optional array specifier.
-pub fn arrayed_identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::ArrayedIdentifier> {
+pub fn arrayed_identifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ArrayedIdentifier> {
   map(
     pair(identifier, opt(preceded(blank, array_specifier))),
     |(i, a)| syntax::ArrayedIdentifier::new(i, a),
@@ -516,7 +550,9 @@ pub fn arrayed_identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::ArrayedI
 }
 
 /// Parse a struct field declaration.
-pub fn struct_field_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::StructFieldSpecifier> {
+pub fn struct_field_specifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::StructFieldSpecifier> {
   let (i, (qualifier, ty, identifiers, _)) = tuple((
     opt(terminated(type_qualifier, blank)),
     terminated(type_specifier, blank),
@@ -537,7 +573,9 @@ pub fn struct_field_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::Stru
 }
 
 /// Parse a struct.
-pub fn struct_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::StructSpecifier> {
+pub fn struct_specifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::StructSpecifier> {
   preceded(
     terminated(keyword("struct"), blank),
     map(
@@ -558,9 +596,9 @@ pub fn struct_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::StructSpec
 }
 
 /// Parse a storage qualifier subroutine rule with a list of type names.
-pub fn storage_qualifier_subroutine_list(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::StorageQualifier> {
+pub fn storage_qualifier_subroutine_list<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
   map(
     preceded(
       terminated(keyword("subroutine"), blank),
@@ -575,9 +613,9 @@ pub fn storage_qualifier_subroutine_list(
 }
 
 /// Parse a storage qualifier subroutine rule.
-pub fn storage_qualifier_subroutine(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::StorageQualifier> {
+pub fn storage_qualifier_subroutine<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
   alt((
     storage_qualifier_subroutine_list,
     value(
@@ -588,7 +626,9 @@ pub fn storage_qualifier_subroutine(
 }
 
 /// Parse a storage qualifier.
-pub fn storage_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::StorageQualifier> {
+pub fn storage_qualifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
   alt((
     value(syntax::StorageQualifier::Const, keyword("const")),
     value(syntax::StorageQualifier::InOut, keyword("inout")),
@@ -612,7 +652,9 @@ pub fn storage_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::StorageQu
 }
 
 /// Parse a layout qualifier.
-pub fn layout_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQualifier> {
+pub fn layout_qualifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::LayoutQualifier> {
   preceded(
     terminated(keyword("layout"), blank),
     delimited(
@@ -623,7 +665,9 @@ pub fn layout_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQual
   )(i)
 }
 
-fn layout_qualifier_inner(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQualifier> {
+fn layout_qualifier_inner<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::LayoutQualifier> {
   map(
     separated_list(
       terminated(char(','), blank),
@@ -635,7 +679,9 @@ fn layout_qualifier_inner(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQu
   )(i)
 }
 
-fn layout_qualifier_spec(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQualifierSpec> {
+fn layout_qualifier_spec<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::LayoutQualifierSpec> {
   alt((
     value(syntax::LayoutQualifierSpec::Shared, keyword("shared")),
     map(
@@ -653,7 +699,9 @@ fn layout_qualifier_spec(i: LocatedSpan<&str>) -> ParserResult<syntax::LayoutQua
 }
 
 /// Parse a precision qualifier.
-pub fn precision_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::PrecisionQualifier> {
+pub fn precision_qualifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PrecisionQualifier> {
   alt((
     value(syntax::PrecisionQualifier::High, keyword("highp")),
     value(syntax::PrecisionQualifier::Medium, keyword("mediump")),
@@ -662,9 +710,9 @@ pub fn precision_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::Precisi
 }
 
 /// Parse an interpolation qualifier.
-pub fn interpolation_qualifier(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::InterpolationQualifier> {
+pub fn interpolation_qualifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::InterpolationQualifier> {
   alt((
     value(syntax::InterpolationQualifier::Smooth, keyword("smooth")),
     value(syntax::InterpolationQualifier::Flat, keyword("flat")),
@@ -676,17 +724,19 @@ pub fn interpolation_qualifier(
 }
 
 /// Parse an invariant qualifier.
-pub fn invariant_qualifier(i: LocatedSpan<&str>) -> ParserResult<()> {
+pub fn invariant_qualifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   value((), keyword("invariant"))(i)
 }
 
 /// Parse a precise qualifier.
-pub fn precise_qualifier(i: LocatedSpan<&str>) -> ParserResult<()> {
+pub fn precise_qualifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
   value((), keyword("precise"))(i)
 }
 
 /// Parse a type qualifier.
-pub fn type_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeQualifier> {
+pub fn type_qualifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TypeQualifier> {
   map(many1(terminated(type_qualifier_spec, blank)), |qlfs| {
     syntax::TypeQualifier {
       qualifiers: syntax::NonEmpty(qlfs),
@@ -695,7 +745,9 @@ pub fn type_qualifier(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeQualifie
 }
 
 /// Parse a type qualifier spec.
-pub fn type_qualifier_spec(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeQualifierSpec> {
+pub fn type_qualifier_spec<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TypeQualifierSpec> {
   alt((
     map(storage_qualifier, syntax::TypeQualifierSpec::Storage),
     map(layout_qualifier, syntax::TypeQualifierSpec::Layout),
@@ -710,7 +762,9 @@ pub fn type_qualifier_spec(i: LocatedSpan<&str>) -> ParserResult<syntax::TypeQua
 }
 
 /// Parse a fully specified type.
-pub fn fully_specified_type(i: LocatedSpan<&str>) -> ParserResult<syntax::FullySpecifiedType> {
+pub fn fully_specified_type<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FullySpecifiedType> {
   map(
     pair(opt(type_qualifier), type_specifier),
     |(qualifier, ty)| syntax::FullySpecifiedType { qualifier, ty },
@@ -718,7 +772,9 @@ pub fn fully_specified_type(i: LocatedSpan<&str>) -> ParserResult<syntax::FullyS
 }
 
 /// Parse an array specifier
-pub fn array_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::ArraySpecifier> {
+pub fn array_specifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ArraySpecifier> {
   map(
     many1(delimited(blank, array_specifier_dimension, blank)),
     |dimensions| syntax::ArraySpecifier {
@@ -728,7 +784,9 @@ pub fn array_specifier(i: LocatedSpan<&str>) -> ParserResult<syntax::ArraySpecif
 }
 
 /// Parse an array specifier dimension.
-pub fn array_specifier_dimension(i: LocatedSpan<&str>) -> ParserResult<syntax::ArraySpecifierDimension> {
+pub fn array_specifier_dimension<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ArraySpecifierDimension> {
   alt((
     value(
       syntax::ArraySpecifierDimension::Unsized,
@@ -746,7 +804,7 @@ pub fn array_specifier_dimension(i: LocatedSpan<&str>) -> ParserResult<syntax::A
 }
 
 /// Parse a primary expression.
-pub fn primary_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn primary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   alt((
     parens_expr,
     map(float_lit, syntax::Expr::FloatConst),
@@ -759,7 +817,7 @@ pub fn primary_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a postfix expression.
-pub fn postfix_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn postfix_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, e) = alt((
     function_call_with_identifier,
     function_call_with_expr_ident_or_expr,
@@ -770,7 +828,10 @@ pub fn postfix_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 
 // Parse the postfix part of a primary expression. This function will just parse until it cannot
 // find any more postfix construct.
-fn postfix_part(i: LocatedSpan<&str>, e: syntax::Expr) -> ParserResult<syntax::Expr> {
+fn postfix_part<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+  e: syntax::Expr,
+) -> ParserResult<'c, 'd, syntax::Expr> {
   let r = alt((
     map(preceded(blank, array_specifier), |a| {
       syntax::Expr::Bracket(Box::new(e.clone()), a)
@@ -796,7 +857,7 @@ fn postfix_part(i: LocatedSpan<&str>, e: syntax::Expr) -> ParserResult<syntax::E
 }
 
 /// Parse a unary expression.
-pub fn unary_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn unary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   alt((
     map(separated_pair(unary_op, blank, unary_expr), |(op, e)| {
       syntax::Expr::Unary(op, Box::new(e))
@@ -806,7 +867,7 @@ pub fn unary_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse an expression between parens.
-pub fn parens_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn parens_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   delimited(
     terminated(char('('), blank),
     expr,
@@ -815,12 +876,16 @@ pub fn parens_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a dot field selection identifier.
-pub fn dot_field_selection(i: LocatedSpan<&str>) -> ParserResult<syntax::Identifier> {
+pub fn dot_field_selection<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Identifier> {
   preceded(terminated(char('.'), blank), cut(identifier))(i)
 }
 
 /// Parse a declaration.
-pub fn declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::Declaration>> {
+pub fn declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Node<syntax::Declaration>> {
   parse_located!(i, {
     alt((
       map(
@@ -839,7 +904,9 @@ pub fn declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::De
 }
 
 /// Parse a precision declaration.
-pub fn precision_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declaration> {
+pub fn precision_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Declaration> {
   delimited(
     terminated(keyword("precision"), blank),
     map(
@@ -854,7 +921,9 @@ pub fn precision_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Decla
 }
 
 /// Parse a block declaration.
-pub fn block_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declaration> {
+pub fn block_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Declaration> {
   map(
     tuple((
       terminated(type_qualifier, blank),
@@ -884,7 +953,9 @@ pub fn block_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declarati
 }
 
 /// Parse a global declaration.
-pub fn global_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declaration> {
+pub fn global_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Declaration> {
   map(
     pair(
       terminated(type_qualifier, blank),
@@ -895,12 +966,16 @@ pub fn global_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::Declarat
 }
 
 /// Parse a function prototype.
-pub fn function_prototype(i: LocatedSpan<&str>) -> ParserResult<syntax::FunctionPrototype> {
+pub fn function_prototype<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
   terminated(function_declarator, terminated(blank, cut(char(')'))))(i)
 }
 
 /// Parse an init declarator list.
-pub fn init_declarator_list(i: LocatedSpan<&str>) -> ParserResult<syntax::InitDeclaratorList> {
+pub fn init_declarator_list<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::InitDeclaratorList> {
   map(
     pair(
       single_declaration,
@@ -921,7 +996,9 @@ pub fn init_declarator_list(i: LocatedSpan<&str>) -> ParserResult<syntax::InitDe
 }
 
 /// Parse a single declaration.
-pub fn single_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::SingleDeclaration> {
+pub fn single_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::SingleDeclaration> {
   let (i, ty) = fully_specified_type(i)?;
   let ty_ = ty.clone();
 
@@ -952,7 +1029,7 @@ pub fn single_declaration(i: LocatedSpan<&str>) -> ParserResult<syntax::SingleDe
 }
 
 /// Parse an initializer.
-pub fn initializer(i: LocatedSpan<&str>) -> ParserResult<syntax::Initializer> {
+pub fn initializer<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Initializer> {
   alt((
     map(assignment_expr, |e| {
       syntax::Initializer::Simple(Box::new(e))
@@ -972,11 +1049,15 @@ pub fn initializer(i: LocatedSpan<&str>) -> ParserResult<syntax::Initializer> {
 }
 
 /// Parse an initializer list.
-pub fn initializer_list(i: LocatedSpan<&str>) -> ParserResult<Vec<syntax::Initializer>> {
+pub fn initializer_list<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Vec<syntax::Initializer>> {
   separated_list(delimited(blank, char(','), blank), initializer)(i)
 }
 
-fn function_declarator(i: LocatedSpan<&str>) -> ParserResult<syntax::FunctionPrototype> {
+fn function_declarator<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
   alt((
     function_header_with_parameters,
     map(function_header, |(ty, name)| syntax::FunctionPrototype {
@@ -987,18 +1068,18 @@ fn function_declarator(i: LocatedSpan<&str>) -> ParserResult<syntax::FunctionPro
   ))(i)
 }
 
-fn function_header(
-  i: LocatedSpan<&str>,
-) -> ParserResult<(syntax::FullySpecifiedType, syntax::Identifier)> {
+fn function_header<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, (syntax::FullySpecifiedType, syntax::Identifier)> {
   pair(
     terminated(fully_specified_type, blank),
     terminated(identifier, terminated(blank, char('('))),
   )(i)
 }
 
-fn function_header_with_parameters(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::FunctionPrototype> {
+fn function_header_with_parameters<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
   map(
     pair(
       function_header,
@@ -1015,18 +1096,18 @@ fn function_header_with_parameters(
   )(i)
 }
 
-fn function_parameter_declaration(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
   alt((
     function_parameter_declaration_named,
     function_parameter_declaration_unnamed,
   ))(i)
 }
 
-fn function_parameter_declaration_named(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration_named<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
   map(
     pair(
       opt(terminated(type_qualifier, blank)),
@@ -1036,18 +1117,18 @@ fn function_parameter_declaration_named(
   )(i)
 }
 
-fn function_parameter_declaration_unnamed(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration_unnamed<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
   map(
     pair(opt(terminated(type_qualifier, blank)), type_specifier),
     |(ty_qual, ty_spec)| syntax::FunctionParameterDeclaration::Unnamed(ty_qual, ty_spec),
   )(i)
 }
 
-fn function_parameter_declarator(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::FunctionParameterDeclarator> {
+fn function_parameter_declarator<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclarator> {
   map(
     tuple((
       terminated(type_specifier, blank),
@@ -1061,14 +1142,18 @@ fn function_parameter_declarator(
   )(i)
 }
 
-fn function_call_with_identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+fn function_call_with_identifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Expr> {
   map(
     tuple((function_identifier_identifier, function_call_args)),
     |(fi, args)| syntax::Expr::FunCall(fi, args),
   )(i)
 }
 
-fn function_call_with_expr_ident_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+fn function_call_with_expr_ident_or_expr<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Expr> {
   map(
     tuple((function_identifier_expr, opt(function_call_args))),
     |(expr, args)| match args {
@@ -1078,7 +1163,9 @@ fn function_call_with_expr_ident_or_expr(i: LocatedSpan<&str>) -> ParserResult<s
   )(i)
 }
 
-fn function_call_args(i: LocatedSpan<&str>) -> ParserResult<Vec<syntax::Expr>> {
+fn function_call_args<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, Vec<syntax::Expr>> {
   preceded(
     terminated(terminated(blank, char('(')), blank),
     alt((
@@ -1097,14 +1184,18 @@ fn function_call_args(i: LocatedSpan<&str>) -> ParserResult<Vec<syntax::Expr>> {
   )(i)
 }
 
-fn function_identifier_identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::FunIdentifier> {
+fn function_identifier_identifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
   map(
     terminated(identifier, terminated(blank, peek(char('(')))),
     syntax::FunIdentifier::Identifier,
   )(i)
 }
 
-fn function_identifier_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::FunIdentifier> {
+fn function_identifier_expr<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
   (|i| {
     let (i, e) = primary_expr(i)?;
     postfix_part(i, e).map(|(i, pfe)| (i, syntax::FunIdentifier::Expr(Box::new(pfe))))
@@ -1112,12 +1203,14 @@ fn function_identifier_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::FunIde
 }
 
 /// Parse a function identifier just behind a function list argument.
-pub fn function_identifier(i: LocatedSpan<&str>) -> ParserResult<syntax::FunIdentifier> {
+pub fn function_identifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
   alt((function_identifier_identifier, function_identifier_expr))(i)
 }
 
 /// Parse the most general expression.
-pub fn expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, first) = assignment_expr(i)?;
   let first_ = first.clone();
 
@@ -1130,7 +1223,7 @@ pub fn expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse an assignment expression.
-pub fn assignment_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn assignment_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   alt((
     map(
       tuple((
@@ -1145,7 +1238,9 @@ pub fn assignment_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse an assignment operator.
-pub fn assignment_op(i: LocatedSpan<&str>) -> ParserResult<syntax::AssignmentOp> {
+pub fn assignment_op<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::AssignmentOp> {
   alt((
     value(syntax::AssignmentOp::Equal, char('=')),
     value(syntax::AssignmentOp::Mult, tag("*=")),
@@ -1162,7 +1257,7 @@ pub fn assignment_op(i: LocatedSpan<&str>) -> ParserResult<syntax::AssignmentOp>
 }
 
 /// Parse a conditional expression.
-pub fn cond_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn cond_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = logical_or_expr(i)?;
 
   fold_many0(
@@ -1178,7 +1273,7 @@ pub fn cond_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a logical OR expression.
-pub fn logical_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn logical_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = logical_xor_expr(i)?;
 
   fold_many0(
@@ -1189,7 +1284,7 @@ pub fn logical_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a logical XOR expression.
-pub fn logical_xor_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn logical_xor_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = logical_and_expr(i)?;
 
   fold_many0(
@@ -1200,7 +1295,7 @@ pub fn logical_xor_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a logical AND expression.
-pub fn logical_and_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn logical_and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = inclusive_or_expr(i)?;
 
   fold_many0(
@@ -1211,7 +1306,7 @@ pub fn logical_and_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a bitwise OR expression.
-pub fn inclusive_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn inclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = exclusive_or_expr(i)?;
 
   fold_many0(
@@ -1222,7 +1317,7 @@ pub fn inclusive_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a bitwise XOR expression.
-pub fn exclusive_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn exclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = and_expr(i)?;
 
   fold_many0(
@@ -1233,7 +1328,7 @@ pub fn exclusive_or_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a bitwise AND expression.
-pub fn and_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = equality_expr(i)?;
 
   fold_many0(
@@ -1244,7 +1339,7 @@ pub fn and_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse an equality expression.
-pub fn equality_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn equality_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = rel_expr(i)?;
 
   fold_many0(
@@ -1265,7 +1360,7 @@ pub fn equality_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a relational expression.
-pub fn rel_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn rel_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = shift_expr(i)?;
 
   fold_many0(
@@ -1288,7 +1383,7 @@ pub fn rel_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a shift expression.
-pub fn shift_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn shift_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = additive_expr(i)?;
 
   fold_many0(
@@ -1309,7 +1404,7 @@ pub fn shift_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse an additive expression.
-pub fn additive_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn additive_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = multiplicative_expr(i)?;
 
   fold_many0(
@@ -1330,7 +1425,9 @@ pub fn additive_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a multiplicative expression.
-pub fn multiplicative_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
+pub fn multiplicative_expr<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Expr> {
   let (i, a) = unary_expr(i)?;
 
   fold_many0(
@@ -1352,7 +1449,9 @@ pub fn multiplicative_expr(i: LocatedSpan<&str>) -> ParserResult<syntax::Expr> {
 }
 
 /// Parse a simple statement.
-pub fn simple_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SimpleStatement> {
+pub fn simple_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::SimpleStatement> {
   alt((
     map(jump_statement, syntax::SimpleStatement::Jump),
     map(iteration_statement, syntax::SimpleStatement::Iteration),
@@ -1367,12 +1466,16 @@ pub fn simple_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SimpleStat
 }
 
 /// Parse an expression statement.
-pub fn expr_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::ExprStatement> {
+pub fn expr_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ExprStatement> {
   terminated(terminated(opt(expr), blank), char(';'))(i)
 }
 
 /// Parse a selection statement.
-pub fn selection_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SelectionStatement> {
+pub fn selection_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::SelectionStatement> {
   map(
     tuple((
       terminated(keyword("if"), blank),
@@ -1388,7 +1491,9 @@ pub fn selection_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Selecti
   )(i)
 }
 
-fn selection_rest_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SelectionRestStatement> {
+fn selection_rest_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::SelectionRestStatement> {
   let (i, st) = statement(i)?;
   let st_ = st.clone();
 
@@ -1402,7 +1507,9 @@ fn selection_rest_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Select
 }
 
 /// Parse a switch statement.
-pub fn switch_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SwitchStatement> {
+pub fn switch_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::SwitchStatement> {
   map(
     tuple((
       terminated(keyword("switch"), blank),
@@ -1421,7 +1528,7 @@ pub fn switch_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::SwitchStat
 }
 
 /// Parse a case label.
-pub fn case_label(i: LocatedSpan<&str>) -> ParserResult<syntax::CaseLabel> {
+pub fn case_label<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::CaseLabel> {
   alt((
     map(
       delimited(
@@ -1439,7 +1546,9 @@ pub fn case_label(i: LocatedSpan<&str>) -> ParserResult<syntax::CaseLabel> {
 }
 
 /// Parse an iteration statement.
-pub fn iteration_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::IterationStatement> {
+pub fn iteration_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::IterationStatement> {
   alt((
     iteration_statement_while,
     iteration_statement_do_while,
@@ -1448,7 +1557,9 @@ pub fn iteration_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Iterati
 }
 
 /// Parse a while statement.
-pub fn iteration_statement_while(i: LocatedSpan<&str>) -> ParserResult<syntax::IterationStatement> {
+pub fn iteration_statement_while<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("while"), blank),
@@ -1462,9 +1573,9 @@ pub fn iteration_statement_while(i: LocatedSpan<&str>) -> ParserResult<syntax::I
 }
 
 /// Parse a while statement.
-pub fn iteration_statement_do_while(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::IterationStatement> {
+pub fn iteration_statement_do_while<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("do"), blank),
@@ -1480,7 +1591,9 @@ pub fn iteration_statement_do_while(
 }
 
 // Parse a for statement.
-pub fn iteration_statement_for(i: LocatedSpan<&str>) -> ParserResult<syntax::IterationStatement> {
+pub fn iteration_statement_for<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("for"), blank),
@@ -1494,9 +1607,9 @@ pub fn iteration_statement_for(i: LocatedSpan<&str>) -> ParserResult<syntax::Ite
   )(i)
 }
 
-fn iteration_statement_for_init_statement(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::ForInitStatement> {
+fn iteration_statement_for_init_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ForInitStatement> {
   alt((
     map(expr_statement, syntax::ForInitStatement::Expression),
     map(declaration, |d| {
@@ -1505,9 +1618,9 @@ fn iteration_statement_for_init_statement(
   ))(i)
 }
 
-fn iteration_statement_for_rest_statement(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::ForRestStatement> {
+fn iteration_statement_for_rest_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::ForRestStatement> {
   map(
     separated_pair(
       opt(terminated(condition, blank)),
@@ -1522,7 +1635,9 @@ fn iteration_statement_for_rest_statement(
 }
 
 /// Parse a jump statement.
-pub fn jump_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatement> {
+pub fn jump_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::JumpStatement> {
   alt((
     jump_statement_continue,
     jump_statement_break,
@@ -1532,7 +1647,9 @@ pub fn jump_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatemen
 }
 
 // Parse a continue statement.
-pub fn jump_statement_continue(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatement> {
+pub fn jump_statement_continue<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Continue,
     terminated(keyword("continue"), cut(terminated(blank, char(';')))),
@@ -1540,7 +1657,9 @@ pub fn jump_statement_continue(i: LocatedSpan<&str>) -> ParserResult<syntax::Jum
 }
 
 // Parse a break statement.
-pub fn jump_statement_break(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatement> {
+pub fn jump_statement_break<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Break,
     terminated(keyword("break"), cut(terminated(blank, char(';')))),
@@ -1548,7 +1667,9 @@ pub fn jump_statement_break(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpSt
 }
 
 // Parse a discard statement.
-pub fn jump_statement_discard(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatement> {
+pub fn jump_statement_discard<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Discard,
     terminated(keyword("discard"), cut(terminated(blank, char(';')))),
@@ -1556,7 +1677,9 @@ pub fn jump_statement_discard(i: LocatedSpan<&str>) -> ParserResult<syntax::Jump
 }
 
 // Parse a return statement.
-pub fn jump_statement_return(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpStatement> {
+pub fn jump_statement_return<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::JumpStatement> {
   map(
     delimited(
       terminated(keyword("return"), blank),
@@ -1568,14 +1691,16 @@ pub fn jump_statement_return(i: LocatedSpan<&str>) -> ParserResult<syntax::JumpS
 }
 
 /// Parse a condition.
-pub fn condition(i: LocatedSpan<&str>) -> ParserResult<syntax::Condition> {
+pub fn condition<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Condition> {
   alt((
     map(expr, |e| syntax::Condition::Expr(Box::new(e))),
     condition_assignment,
   ))(i)
 }
 
-fn condition_assignment(i: LocatedSpan<&str>) -> ParserResult<syntax::Condition> {
+fn condition_assignment<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Condition> {
   map(
     tuple((
       terminated(fully_specified_type, blank),
@@ -1588,7 +1713,7 @@ fn condition_assignment(i: LocatedSpan<&str>) -> ParserResult<syntax::Condition>
 }
 
 /// Parse a statement.
-pub fn statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Statement> {
+pub fn statement<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Statement> {
   alt((
     map(compound_statement, |c| {
       syntax::Statement::Compound(Box::new(c))
@@ -1598,7 +1723,9 @@ pub fn statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Statement> {
 }
 
 /// Parse a compound statement.
-pub fn compound_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::CompoundStatement> {
+pub fn compound_statement<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::CompoundStatement> {
   map(
     delimited(
       terminated(char('{'), blank),
@@ -1610,9 +1737,9 @@ pub fn compound_statement(i: LocatedSpan<&str>) -> ParserResult<syntax::Compound
 }
 
 /// Parse a function definition.
-pub fn function_definition(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::Node<syntax::FunctionDefinition>> {
+pub fn function_definition<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Node<syntax::FunctionDefinition>> {
   parse_located!(i, {
     map(
       pair(terminated(function_prototype, blank), compound_statement),
@@ -1625,9 +1752,9 @@ pub fn function_definition(
 }
 
 /// Parse an external declaration.
-pub fn external_declaration(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::Node<syntax::ExternalDeclaration>> {
+pub fn external_declaration<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Node<syntax::ExternalDeclaration>> {
   parse_located!(i, {
     alt((
       map(preprocessor, |n| {
@@ -1649,7 +1776,9 @@ pub fn external_declaration(
 }
 
 /// Parse a translation unit (entry point).
-pub fn translation_unit(i: LocatedSpan<&str>) -> ParserResult<syntax::TranslationUnit> {
+pub fn translation_unit<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::TranslationUnit> {
   map(
     many1(delimited(blank, external_declaration, blank)),
     |eds| syntax::TranslationUnit(syntax::NonEmpty(eds)),
@@ -1657,7 +1786,9 @@ pub fn translation_unit(i: LocatedSpan<&str>) -> ParserResult<syntax::Translatio
 }
 
 /// Parse a preprocessor directive.
-pub fn preprocessor(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::Preprocessor>> {
+pub fn preprocessor<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Node<syntax::Preprocessor>> {
   parse_located!(i, {
     preceded(
       terminated(char('#'), pp_space0),
@@ -1682,14 +1813,14 @@ pub fn preprocessor(i: LocatedSpan<&str>) -> ParserResult<syntax::Node<syntax::P
 }
 
 /// Parse a preprocessor version number.
-pub(crate) fn pp_version_number(i: LocatedSpan<&str>) -> ParserResult<u16> {
-  map(digit1, |x: LocatedSpan<&str>| x.parse_to().unwrap())(i)
+pub(crate) fn pp_version_number<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, u16> {
+  map(digit1, |x: ParseInput<'c, 'd>| x.parse_to().unwrap())(i)
 }
 
 /// Parse a preprocessor version profile.
-pub(crate) fn pp_version_profile(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::PreprocessorVersionProfile> {
+pub(crate) fn pp_version_profile<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorVersionProfile> {
   alt((
     value(syntax::PreprocessorVersionProfile::Core, keyword("core")),
     value(
@@ -1703,12 +1834,16 @@ pub(crate) fn pp_version_profile(
 /// The space parser in preprocessor directives.
 ///
 /// This parser is needed to authorize breaking a line with the multiline annotation (\).
-pub(crate) fn pp_space0(i: LocatedSpan<&str>) -> ParserResult<LocatedSpan<&str>> {
+pub(crate) fn pp_space0<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
   recognize(many0_(alt((space1, tag("\\\n")))))(i)
 }
 
 /// Parse a preprocessor define.
-pub(crate) fn pp_define(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorDefine> {
+pub(crate) fn pp_define<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
   let (i, ident) = map(
     tuple((terminated(keyword("define"), pp_space0), cut(identifier))),
     |(_, ident)| ident,
@@ -1721,9 +1856,9 @@ pub(crate) fn pp_define(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocess
 }
 
 // Parse an object-like #define content.
-pub(crate) fn pp_define_object_like<'a>(
+pub(crate) fn pp_define_object_like<'d, 'c: 'd>(
   ident: syntax::Identifier,
-) -> impl Fn(LocatedSpan<&'a str>) -> ParserResult<'a, syntax::PreprocessorDefine> {
+) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
   move |i| {
     map(preceded(pp_space0, cut(str_till_eol)), |value| {
       syntax::PreprocessorDefine::ObjectLike {
@@ -1735,9 +1870,9 @@ pub(crate) fn pp_define_object_like<'a>(
 }
 
 // Parse a function-like #define content.
-pub(crate) fn pp_define_function_like<'a>(
+pub(crate) fn pp_define_function_like<'d, 'c: 'd>(
   ident: syntax::Identifier,
-) -> impl Fn(LocatedSpan<&'a str>) -> ParserResult<'a, syntax::PreprocessorDefine> {
+) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
   move |i| {
     map(
       tuple((
@@ -1759,7 +1894,9 @@ pub(crate) fn pp_define_function_like<'a>(
 }
 
 /// Parse a preprocessor else.
-pub(crate) fn pp_else(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocessor> {
+pub(crate) fn pp_else<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Preprocessor> {
   value(
     syntax::Preprocessor::Else,
     tuple((terminated(keyword("else"), pp_space0), cut(eol))),
@@ -1767,7 +1904,9 @@ pub(crate) fn pp_else(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocessor
 }
 
 /// Parse a preprocessor elseif.
-pub(crate) fn pp_elseif(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorElseIf> {
+pub(crate) fn pp_elseif<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorElseIf> {
   map(
     tuple((
       terminated(keyword("elseif"), pp_space0),
@@ -1778,7 +1917,9 @@ pub(crate) fn pp_elseif(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocess
 }
 
 /// Parse a preprocessor endif.
-pub(crate) fn pp_endif(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocessor> {
+pub(crate) fn pp_endif<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Preprocessor> {
   map(
     tuple((terminated(keyword("endif"), space0), cut(eol))),
     |(_, _)| syntax::Preprocessor::EndIf,
@@ -1786,7 +1927,9 @@ pub(crate) fn pp_endif(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocesso
 }
 
 /// Parse a preprocessor error.
-pub(crate) fn pp_error(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorError> {
+pub(crate) fn pp_error<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorError> {
   map(
     tuple((terminated(keyword("error"), pp_space0), cut(str_till_eol))),
     |(_, message)| syntax::PreprocessorError {
@@ -1796,7 +1939,9 @@ pub(crate) fn pp_error(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocesso
 }
 
 /// Parse a preprocessor if.
-pub(crate) fn pp_if(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorIf> {
+pub(crate) fn pp_if<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorIf> {
   map(
     tuple((
       terminated(keyword("if"), pp_space0),
@@ -1807,7 +1952,9 @@ pub(crate) fn pp_if(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorIf
 }
 
 /// Parse a preprocessor ifdef.
-pub(crate) fn pp_ifdef(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorIfDef> {
+pub(crate) fn pp_ifdef<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorIfDef> {
   map(
     tuple((
       terminated(keyword("ifdef"), pp_space0),
@@ -1819,7 +1966,9 @@ pub(crate) fn pp_ifdef(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocesso
 }
 
 /// Parse a preprocessor ifndef.
-pub(crate) fn pp_ifndef(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorIfNDef> {
+pub(crate) fn pp_ifndef<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorIfNDef> {
   map(
     tuple((
       terminated(keyword("ifndef"), pp_space0),
@@ -1831,7 +1980,9 @@ pub(crate) fn pp_ifndef(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocess
 }
 
 /// Parse a preprocessor include.
-pub(crate) fn pp_include(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorInclude> {
+pub(crate) fn pp_include<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorInclude> {
   map(
     tuple((
       terminated(keyword("include"), pp_space0),
@@ -1843,7 +1994,9 @@ pub(crate) fn pp_include(i: LocatedSpan<&str>) -> ParserResult<syntax::Preproces
 }
 
 /// Parse a preprocessor line.
-pub(crate) fn pp_line(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorLine> {
+pub(crate) fn pp_line<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorLine> {
   map(
     tuple((
       terminated(keyword("line"), pp_space0),
@@ -1859,7 +2012,9 @@ pub(crate) fn pp_line(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocessor
 }
 
 /// Parse a preprocessor pragma.
-pub(crate) fn pp_pragma(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorPragma> {
+pub(crate) fn pp_pragma<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorPragma> {
   map(
     tuple((terminated(keyword("pragma"), pp_space0), cut(str_till_eol))),
     |(_, command)| syntax::PreprocessorPragma {
@@ -1869,7 +2024,9 @@ pub(crate) fn pp_pragma(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocess
 }
 
 /// Parse a preprocessor undef.
-pub(crate) fn pp_undef(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorUndef> {
+pub(crate) fn pp_undef<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorUndef> {
   map(
     tuple((
       terminated(keyword("undef"), pp_space0),
@@ -1881,7 +2038,9 @@ pub(crate) fn pp_undef(i: LocatedSpan<&str>) -> ParserResult<syntax::Preprocesso
 }
 
 /// Parse a preprocessor version.
-pub(crate) fn pp_version(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorVersion> {
+pub(crate) fn pp_version<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorVersion> {
   map(
     tuple((
       terminated(keyword("version"), pp_space0),
@@ -1894,9 +2053,9 @@ pub(crate) fn pp_version(i: LocatedSpan<&str>) -> ParserResult<syntax::Preproces
 }
 
 /// Parse a preprocessor extension name.
-pub(crate) fn pp_extension_name(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::PreprocessorExtensionName> {
+pub(crate) fn pp_extension_name<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorExtensionName> {
   alt((
     value(syntax::PreprocessorExtensionName::All, keyword("all")),
     map(string, syntax::PreprocessorExtensionName::Specific),
@@ -1904,9 +2063,9 @@ pub(crate) fn pp_extension_name(
 }
 
 /// Parse a preprocessor extension behavior.
-pub(crate) fn pp_extension_behavior(
-  i: LocatedSpan<&str>,
-) -> ParserResult<syntax::PreprocessorExtensionBehavior> {
+pub(crate) fn pp_extension_behavior<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorExtensionBehavior> {
   alt((
     value(
       syntax::PreprocessorExtensionBehavior::Require,
@@ -1925,7 +2084,9 @@ pub(crate) fn pp_extension_behavior(
 }
 
 /// Parse a preprocessor extension.
-pub(crate) fn pp_extension(i: LocatedSpan<&str>) -> ParserResult<syntax::PreprocessorExtension> {
+pub(crate) fn pp_extension<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::PreprocessorExtension> {
   map(
     tuple((
       terminated(keyword("extension"), pp_space0),

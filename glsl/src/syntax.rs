@@ -22,6 +22,8 @@ use std::fmt;
 use std::iter::{once, FromIterator};
 use std::ops::{Deref, DerefMut};
 
+use crate::parsers::ParseInput;
+
 /// Span information for a node, constructed from a nom_locate::LocatedSpan
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NodeSpan {
@@ -37,8 +39,8 @@ pub struct NodeSpan {
   pub length: usize,
 }
 
-impl std::convert::From<nom_locate::LocatedSpan<&'_ str>> for NodeSpan {
-  fn from(span: nom_locate::LocatedSpan<&'_ str>) -> Self {
+impl std::convert::From<ParseInput<'_, '_>> for NodeSpan {
+  fn from(span: ParseInput<'_, '_>) -> Self {
     Self {
       offset: span.location_offset(),
       line: span.location_line(),
@@ -1359,6 +1361,32 @@ pub enum PreprocessorExtensionBehavior {
   Enable,
   Warn,
   Disable,
+}
+
+/// A borrowed comment
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Comment<'s> {
+  /// Single-line comment
+  Single(&'s str),
+  /// Multi-line comment
+  Multi(&'s str),
+}
+
+impl<'s> Comment<'s> {
+  pub fn new_single<'d>(s: ParseInput<'s, 'd>) -> Node<Self> {
+    Node::new(Comment::Single(s.fragment()), s.into())
+  }
+
+  pub fn new_multi<'d>(s: ParseInput<'s, 'd>) -> Node<Self> {
+    Node::new(Comment::Multi(s.fragment()), s.into())
+  }
+
+  pub fn text(&self) -> &str {
+    match self {
+      Self::Single(s) => s,
+      Self::Multi(s) => s,
+    }
+  }
 }
 
 #[cfg(test)]

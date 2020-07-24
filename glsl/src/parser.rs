@@ -14,8 +14,6 @@ use nom::error::convert_error;
 use nom::Err as NomErr;
 use std::fmt;
 
-use nom_locate::LocatedSpan;
-
 use crate::parsers::ParserResult;
 use crate::syntax;
 
@@ -34,12 +32,13 @@ impl fmt::Display for ParseError {
 }
 
 /// Run a parser `P` on a given `[&str`] input.
-pub(crate) fn run_parser<P, T>(source: &str, parser: P) -> Result<T, ParseError>
+pub(crate) fn run_parser<'d, 'c: 'd, P, T>(
+  source: ParseInput<'c, 'd>,
+  parser: P,
+) -> Result<T, ParseError>
 where
-  P: FnOnce(LocatedSpan<&str>) -> ParserResult<T>,
+  P: FnOnce(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, T>,
 {
-  let source = LocatedSpan::new(source);
-
   match parser(source) {
     Ok((_, x)) => Ok(x),
 
@@ -55,7 +54,7 @@ where
             errors: err
               .errors
               .into_iter()
-              .map(|(i, k)| (*i.fragment(), k))
+              .map(|(i, k)| (i.fragment(), k))
               .collect(),
           },
         );
@@ -65,6 +64,9 @@ where
   }
 }
 
+pub use super::parsers::ParseContext;
+use super::parsers::ParseInput;
+
 /// Class of types that can be parsed.
 ///
 /// This trait exposes the [`Parse::parse`] function that can be used to parse GLSL types.
@@ -72,32 +74,45 @@ where
 /// The methods from this trait are the standard way to parse data into GLSL ASTs.
 pub trait Parse: Sized {
   /// Parse from a string slice.
-  fn parse<B>(source: B) -> Result<Self, ParseError>
-  where
-    B: AsRef<str>;
+  fn parse<'b>(source: &'b str) -> Result<Self, ParseError> {
+    let ctx = ParseContext::new();
+    <Self as Parse>::parse_with_context(source, &ctx)
+  }
+
+  /// Parse from a string slice and track syntax details using a context
+  fn parse_with_context<'d, 'b: 'd>(
+    source: &'b str,
+    ctx: &'d ParseContext<'b>,
+  ) -> Result<Self, ParseError>;
 }
 
 /// Macro to implement Parse for a given type.
 macro_rules! impl_parse {
   ($type_name:ty, $parser_name:ident) => {
     impl Parse for $type_name {
-      fn parse<B>(source: B) -> Result<Self, ParseError>
-      where
-        B: AsRef<str>,
-      {
-        run_parser(source.as_ref(), $crate::parsers::$parser_name)
+      fn parse_with_context<'d, 'b: 'd>(
+        source: &'b str,
+        ctx: &'d ParseContext<'b>,
+      ) -> Result<Self, ParseError> {
+        run_parser(
+          ParseInput::new(source.as_ref(), &ctx),
+          $crate::parsers::$parser_name,
+        )
       }
     }
   };
 
   ($type_name:ty, $parser_name:ident => $field:tt) => {
     impl Parse for $type_name {
-      fn parse<B>(source: B) -> Result<Self, ParseError>
-      where
-        B: AsRef<str>,
-      {
-        run_parser(source.as_ref(), |s| {
-          $crate::parsers::$parser_name(s).map(|(i, r)| (i, r.$field))
+      fn parse_with_context<'d, 'b: 'd>(
+        source: &'b str,
+        ctx: &'d ParseContext<'b>,
+      ) -> Result<Self, ParseError> {
+        run_parser(ParseInput::new(source.as_ref(), &ctx), move |s| {
+          match $crate::parsers::$parser_name(s) {
+            Ok((i, r)) => Ok((i, (r.$field))),
+            Err(e) => Err(e),
+          }
         })
       }
     }
