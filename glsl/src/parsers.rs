@@ -62,34 +62,27 @@ fn keyword<'d, 'c: 'd>(
 
 /// Parse a single comment.
 pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Comment<'c>> {
-  let context = i.context;
-
-  map(
+  let (i, res) = parse_located!(i, {
     preceded(
       char('/'),
       alt((
         preceded(
           char('/'),
-          cut(map(str_till_eol, |i| {
-            (syntax::Comment::Single(i.fragment()), i.into())
-          })),
+          cut(map(str_till_eol, |i| syntax::Comment::Single(i.fragment()))),
         ),
         preceded(
           char('*'),
           map(
             terminated(take_until("*/"), tag("*/")),
-            |i: ParseInput<'c, 'd>| -> (_, syntax::NodeSpan) {
-              (syntax::Comment::Multi(i.fragment()), i.into())
-            },
+            |i: ParseInput<'c, 'd>| syntax::Comment::Multi(i.fragment()),
           ),
         ),
       )),
-    ),
-    move |(cmt, span)| {
-      context.add_comment(context.commit_span(cmt, span));
-      cmt
-    },
-  )(i)
+    )(i)
+  })?;
+
+  i.context.add_comment(res);
+  Ok((i, res.into_inner()))
 }
 
 /// Parse several comments.

@@ -96,6 +96,8 @@ impl<T: NodeContents> std::ops::DerefMut for Node<T> {
 // Wrapped syntax nodes can be used as syntax nodes
 impl<T: NodeContents> NodeContents for Node<T> {}
 
+impl<T: NodeContents + Copy> Copy for Node<T> {}
+
 /// A non-empty [`Vec`]. It has at least one element.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NonEmpty<T>(pub Vec<T>);

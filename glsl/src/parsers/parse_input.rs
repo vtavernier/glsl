@@ -19,6 +19,18 @@ impl<'s> ParseContextData<'s> {
   pub fn spans(&self) -> &Option<Vec<syntax::NodeSpan>> {
     &self.spans
   }
+
+  pub fn get_span(&self, span_id: Option<NonZeroUsize>) -> Option<&syntax::NodeSpan> {
+    if let (Some(id), Some(spans)) = (span_id, self.spans.as_ref()) {
+      let id = id.get() - 1;
+
+      if spans.len() > id {
+        return Some(&spans[id]);
+      }
+    }
+
+    None
+  }
 }
 
 #[derive(Debug, Clone)]
