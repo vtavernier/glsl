@@ -1,20 +1,37 @@
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 
 use nom_locate::LocatedSpan;
 
 use crate::syntax;
 
 #[derive(Debug, Clone)]
+pub struct ParseContextData<'s> {
+  comments: Option<Vec<syntax::Node<syntax::Comment<'s>>>>,
+  spans: Option<Vec<syntax::NodeSpan>>,
+}
+
+impl<'s> ParseContextData<'s> {
+  pub fn comments(&self) -> &Option<Vec<syntax::Node<syntax::Comment<'s>>>> {
+    &self.comments
+  }
+
+  pub fn spans(&self) -> &Option<Vec<syntax::NodeSpan>> {
+    &self.spans
+  }
+}
+
+#[derive(Debug, Clone)]
 pub struct ParseContext<'s> {
-  comments: RefCell<Option<Vec<syntax::Node<syntax::Comment<'s>>>>>,
+  data: RefCell<ParseContextData<'s>>,
 }
 
-pub struct ContextComments<'s, 'b> {
-  guard: std::cell::Ref<'b, Option<Vec<syntax::Node<syntax::Comment<'s>>>>>,
+pub struct ContextData<'s, 'b> {
+  guard: std::cell::Ref<'b, ParseContextData<'s>>,
 }
 
-impl<'s> std::ops::Deref for ContextComments<'s, '_> {
-  type Target = Option<Vec<syntax::Node<syntax::Comment<'s>>>>;
+impl<'s> std::ops::Deref for ContextData<'s, '_> {
+  type Target = ParseContextData<'s>;
 
   fn deref(&self) -> &Self::Target {
     &*self.guard
@@ -24,30 +41,61 @@ impl<'s> std::ops::Deref for ContextComments<'s, '_> {
 impl<'s> ParseContext<'s> {
   pub fn new() -> Self {
     Self {
-      comments: RefCell::new(None),
+      data: RefCell::new(ParseContextData {
+        comments: None,
+        spans: None,
+      }),
+    }
+  }
+
+  pub fn with_spans() -> Self {
+    Self {
+      data: RefCell::new(ParseContextData {
+        comments: None,
+        spans: Some(Vec::new()),
+      }),
     }
   }
 
   pub fn with_comments() -> Self {
     Self {
-      comments: RefCell::new(Some(Vec::new())),
+      data: RefCell::new(ParseContextData {
+        comments: Some(Vec::new()),
+        spans: Some(Vec::new()),
+      }),
     }
   }
 
-  pub fn has_comments(&self) -> bool {
-    self.comments.borrow().is_some()
-  }
-
-  pub fn add_comment(&self, f: impl FnOnce() -> syntax::Node<syntax::Comment<'s>>) {
-    if let Some(c) = self.comments.borrow_mut().as_mut() {
-      c.push(f());
+  pub fn add_comment(&self, cmt: syntax::Node<syntax::Comment<'s>>) {
+    if let Some(c) = self.data.borrow_mut().comments.as_mut() {
+      c.push(cmt);
     }
   }
 
-  pub fn comments(&self) -> ContextComments<'_, 's> {
-    ContextComments {
-      guard: self.comments.borrow(),
+  pub fn data(&self) -> ContextData<'_, 's> {
+    ContextData {
+      guard: self.data.borrow(),
     }
+  }
+
+  pub fn into_data(self) -> ParseContextData<'s> {
+    self.data.into_inner()
+  }
+
+  pub fn commit_span<T: syntax::NodeContents>(
+    &self,
+    contents: T,
+    span: syntax::NodeSpan,
+  ) -> syntax::Node<T> {
+    let span_id = if let Some(c) = self.data.borrow_mut().spans.as_mut() {
+      c.push(span);
+      // SAFETY: c.len() will always be > 0
+      Some(unsafe { NonZeroUsize::new_unchecked(c.len()) })
+    } else {
+      None
+    };
+
+    syntax::Node::new(contents, span_id)
   }
 }
 
@@ -67,6 +115,12 @@ impl<'c, 'd> ParseInput<'c, 'd> {
 
   pub fn fragment(&self) -> &'c str {
     self.input.fragment()
+  }
+}
+
+impl<'c> AsRef<str> for ParseInput<'c, '_> {
+  fn as_ref(&self) -> &str {
+    self.fragment()
   }
 }
 

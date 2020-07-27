@@ -20,6 +20,7 @@
 
 use std::fmt;
 use std::iter::{once, FromIterator};
+use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 
 use crate::parsers::ParseInput;
@@ -49,17 +50,19 @@ impl std::convert::From<ParseInput<'_, '_>> for NodeSpan {
   }
 }
 
+pub trait NodeContents: std::fmt::Debug + Clone + PartialEq + Sized {}
+
 /// A syntax node with span information
 #[derive(Debug, Clone, PartialEq)]
-pub struct Node<T: std::fmt::Debug + Clone + PartialEq> {
+pub struct Node<T: NodeContents> {
   pub contents: T,
-  pub span: NodeSpan,
+  pub span_id: Option<NonZeroUsize>,
 }
 
-impl<T: std::fmt::Debug + Clone + PartialEq> Node<T> {
+impl<T: NodeContents> Node<T> {
   /// Create a new syntax node with span information
-  pub fn new(contents: T, span: NodeSpan) -> Self {
-    Self { contents, span }
+  pub fn new(contents: T, span_id: Option<NonZeroUsize>) -> Self {
+    Self { contents, span_id }
   }
 
   /// Return the wrapped syntax node, discarding the span information
@@ -68,15 +71,15 @@ impl<T: std::fmt::Debug + Clone + PartialEq> Node<T> {
   }
 
   /// Map this contents of this node into a new node
-  pub fn map<U: std::fmt::Debug + Clone + PartialEq>(self, f: impl FnOnce(T) -> U) -> Node<U> {
+  pub fn map<U: NodeContents>(self, f: impl FnOnce(T) -> U) -> Node<U> {
     Node {
       contents: f(self.contents),
-      span: self.span,
+      span_id: self.span_id,
     }
   }
 }
 
-impl<T: std::fmt::Debug + Clone + PartialEq> std::ops::Deref for Node<T> {
+impl<T: NodeContents> std::ops::Deref for Node<T> {
   type Target = T;
 
   fn deref(&self) -> &Self::Target {
@@ -84,11 +87,14 @@ impl<T: std::fmt::Debug + Clone + PartialEq> std::ops::Deref for Node<T> {
   }
 }
 
-impl<T: std::fmt::Debug + Clone + PartialEq> std::ops::DerefMut for Node<T> {
+impl<T: NodeContents> std::ops::DerefMut for Node<T> {
   fn deref_mut(&mut self) -> &mut Self::Target {
     &mut self.contents
   }
 }
+
+// Wrapped syntax nodes can be used as syntax nodes
+impl<T: NodeContents> NodeContents for Node<T> {}
 
 /// A non-empty [`Vec`]. It has at least one element.
 #[derive(Clone, Debug, PartialEq)]
@@ -643,6 +649,8 @@ pub enum Declaration {
   Global(TypeQualifier, Vec<Identifier>),
 }
 
+impl NodeContents for Declaration {}
+
 /// A general purpose block, containing fields and possibly a list of declared identifiers. Semantic
 /// is given with the storage qualifier.
 #[derive(Clone, Debug, PartialEq)]
@@ -945,6 +953,8 @@ pub enum ExternalDeclaration {
   Declaration(Declaration),
 }
 
+impl NodeContents for ExternalDeclaration {}
+
 impl ExternalDeclaration {
   /// Create a new function.
   pub fn new_fn<T, N, A, S>(ret_ty: T, name: N, args: A, body: S) -> Self
@@ -1011,6 +1021,8 @@ pub struct FunctionDefinition {
   pub prototype: FunctionPrototype,
   pub statement: CompoundStatement,
 }
+
+impl NodeContents for FunctionDefinition {}
 
 /// Compound statement (with no new scope).
 #[derive(Clone, Debug, PartialEq)]
@@ -1250,6 +1262,8 @@ pub enum Preprocessor {
   Extension(PreprocessorExtension),
 }
 
+impl NodeContents for Preprocessor {}
+
 /// A #define preprocessor directive.
 ///
 /// Allows any expression but only Integer and Float literals make sense
@@ -1373,14 +1387,6 @@ pub enum Comment<'s> {
 }
 
 impl<'s> Comment<'s> {
-  pub fn new_single<'d>(s: ParseInput<'s, 'd>) -> Node<Self> {
-    Node::new(Comment::Single(s.fragment()), s.into())
-  }
-
-  pub fn new_multi<'d>(s: ParseInput<'s, 'd>) -> Node<Self> {
-    Node::new(Comment::Multi(s.fragment()), s.into())
-  }
-
   pub fn text(&self) -> &str {
     match self {
       Self::Single(s) => s,
@@ -1388,6 +1394,8 @@ impl<'s> Comment<'s> {
     }
   }
 }
+
+impl NodeContents for Comment<'_> {}
 
 #[cfg(test)]
 mod tests {

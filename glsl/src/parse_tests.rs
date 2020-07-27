@@ -21,7 +21,7 @@ fn assert_eq_parser<'d, 'c: 'd, R: PartialEq + std::fmt::Debug>(
   );
 }
 
-fn assert_eq_parser_1<'d, 'c: 'd, R: PartialEq + std::fmt::Debug + Clone>(
+fn assert_eq_parser_1<'d, 'c: 'd, R: syntax::NodeContents>(
   parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Node<R>>,
   input: &'c str,
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
@@ -64,30 +64,48 @@ fn assert_eq_parser_str<'d, 'c: 'd>(
 #[test]
 fn parse_uniline_comment() {
   let ctx = ParseContext::with_comments();
-  assert_eq_parser_str(comment, "// lol", Ok(("", " lol")), &ctx);
-  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
-  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol");
-
-  let ctx = ParseContext::with_comments();
-  assert_eq_parser_str(comment, "// lol\nfoo", Ok(("foo", " lol")), &ctx);
-  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
-  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol");
-
-  let ctx = ParseContext::with_comments();
-  assert_eq_parser_str(comment, "// lol\\\nfoo", Ok(("", " lol\\\nfoo")), &ctx);
-  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
-  assert_eq!(ctx.comments().as_ref().unwrap()[0].text(), " lol\\\nfoo");
-
-  let ctx = ParseContext::with_comments();
-  assert_eq_parser_str(
+  assert_eq_parser(
     comment,
-    "// lol   \\\n   foo\n",
-    Ok(("", " lol   \\\n   foo")),
+    "// lol",
+    Ok(("", syntax::Comment::Single(" lol"))),
     &ctx,
   );
-  assert_eq!(ctx.comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.data().comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.data().comments().as_ref().unwrap()[0].text(), " lol");
+
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser(
+    comment,
+    "// lol\nfoo",
+    Ok(("foo", syntax::Comment::Single(" lol"))),
+    &ctx,
+  );
+  assert_eq!(ctx.data().comments().as_ref().unwrap().len(), 1);
+  assert_eq!(ctx.data().comments().as_ref().unwrap()[0].text(), " lol");
+
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser(
+    comment,
+    "// lol\\\nfoo",
+    Ok(("", syntax::Comment::Single(" lol\\\nfoo"))),
+    &ctx,
+  );
+  assert_eq!(ctx.data().comments().as_ref().unwrap().len(), 1);
   assert_eq!(
-    ctx.comments().as_ref().unwrap()[0].text(),
+    ctx.data().comments().as_ref().unwrap()[0].text(),
+    " lol\\\nfoo"
+  );
+
+  let ctx = ParseContext::with_comments();
+  assert_eq_parser(
+    comment,
+    "// lol   \\\n   foo\n",
+    Ok(("", syntax::Comment::Single(" lol   \\\n   foo"))),
+    &ctx,
+  );
+  assert_eq!(ctx.data().comments().as_ref().unwrap().len(), 1);
+  assert_eq!(
+    ctx.data().comments().as_ref().unwrap()[0].text(),
     " lol   \\\n   foo"
   );
 }
@@ -96,10 +114,10 @@ fn parse_uniline_comment() {
 fn parse_multiline_comment() {
   let ctx = ParseContext::new();
 
-  assert_eq_parser_str(
+  assert_eq_parser(
     comment,
     "/* lol\nfoo\n*/bar",
-    Ok(("bar", " lol\nfoo\n")),
+    Ok(("bar", syntax::Comment::Multi(" lol\nfoo\n"))),
     &ctx,
   );
 }
@@ -3342,11 +3360,7 @@ fn parse_buffer_block_0() {
         statement_list: Vec::new(),
       },
     }),
-    span: syntax::NodeSpan {
-      offset: 46,
-      line: 5,
-      length: 15,
-    },
+    span_id: None,
   };
 
   let buffer_block = syntax::Node {
@@ -3372,11 +3386,7 @@ fn parse_buffer_block_0() {
       }],
       identifier: Some("main_tiles".into()),
     })),
-    span: syntax::NodeSpan {
-      offset: 0,
-      line: 1,
-      length: 44,
-    },
+    span_id: None,
   };
 
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![buffer_block, main_fn]));
@@ -3421,11 +3431,7 @@ fn parse_layout_buffer_block_0() {
       }],
       identifier: Some("foo".into()),
     })),
-    span: syntax::NodeSpan {
-      offset: 0,
-      line: 1,
-      length: src.len() - 1, // Final newline
-    },
+    span_id: None,
   };
 
   let expected = syntax::TranslationUnit(syntax::NonEmpty(vec![block]));

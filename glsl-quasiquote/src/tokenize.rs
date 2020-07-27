@@ -1442,9 +1442,8 @@ fn tokenize_external_declaration(ed: &syntax::Node<syntax::ExternalDeclaration>)
     }
   };
 
-  let span = tokenize_span(&ed.span);
-
-  quote! { glsl::syntax::Node::new(#contents, #span) }
+  // TODO: Tokenize node spans from context?
+  quote! { glsl::syntax::Node::new(#contents, None) }
 }
 
 fn tokenize_translation_unit(tu: &syntax::TranslationUnit) -> TokenStream {

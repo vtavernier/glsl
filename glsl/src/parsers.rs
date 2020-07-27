@@ -41,7 +41,7 @@ macro_rules! parse_located {
 
     Ok((
       $i,
-      syntax::Node::new(
+      s.context.commit_span(
         res,
         s.slice(0..(end.location_offset() - start.location_offset()))
           .into(),
@@ -61,28 +61,34 @@ fn keyword<'d, 'c: 'd>(
 }
 
 /// Parse a single comment.
-pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
-  preceded(
-    char('/'),
-    alt((
-      preceded(
-        char('/'),
-        cut(map(str_till_eol, |i| {
-          i.context.add_comment(|| syntax::Comment::new_single(i));
-          i
-        })),
-      ),
-      preceded(
-        char('*'),
-        cut(map(
-          terminated(take_until("*/"), tag("*/")),
-          |i: ParseInput<'c, 'd>| {
-            i.context.add_comment(|| syntax::Comment::new_multi(i));
-            i
-          },
-        )),
-      ),
-    )),
+pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Comment<'c>> {
+  let context = i.context;
+
+  map(
+    preceded(
+      char('/'),
+      alt((
+        preceded(
+          char('/'),
+          cut(map(str_till_eol, |i| {
+            (syntax::Comment::Single(i.fragment()), i.into())
+          })),
+        ),
+        preceded(
+          char('*'),
+          map(
+            terminated(take_until("*/"), tag("*/")),
+            |i: ParseInput<'c, 'd>| -> (_, syntax::NodeSpan) {
+              (syntax::Comment::Multi(i.fragment()), i.into())
+            },
+          ),
+        ),
+      )),
+    ),
+    move |(cmt, span)| {
+      context.add_comment(context.commit_span(cmt, span));
+      cmt
+    },
   )(i)
 }
 

@@ -50,11 +50,7 @@ fn left_associativity() {
           ))],
         },
       }),
-      span: syntax::NodeSpan {
-        offset: 0,
-        line: 1,
-        length: s.len(),
-      },
+      span_id: None,
     }])
     .unwrap();
 
