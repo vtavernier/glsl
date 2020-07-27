@@ -50,7 +50,11 @@ impl std::convert::From<ParseInput<'_, '_>> for NodeSpan {
   }
 }
 
-pub trait NodeContents: std::fmt::Debug + Clone + PartialEq + Sized {}
+pub trait NodeContents: std::fmt::Debug + Clone + PartialEq + Sized {
+  fn into_node(self) -> Node<Self> {
+    Node::new(self, None)
+  }
+}
 
 /// A syntax node with span information
 #[derive(Debug, Clone, PartialEq)]
@@ -96,7 +100,15 @@ impl<T: NodeContents> std::ops::DerefMut for Node<T> {
 // Wrapped syntax nodes can be used as syntax nodes
 impl<T: NodeContents> NodeContents for Node<T> {}
 
+// Trivial copy for the node if the wrapped contents are Copy
 impl<T: NodeContents + Copy> Copy for Node<T> {}
+
+// Display implementation for wrapped node
+impl<T: NodeContents + std::fmt::Display> std::fmt::Display for Node<T> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    <T as std::fmt::Display>::fmt(&self.contents, f)
+  }
+}
 
 /// A non-empty [`Vec`]. It has at least one element.
 #[derive(Clone, Debug, PartialEq)]
@@ -260,6 +272,20 @@ impl From<String> for Identifier {
 impl fmt::Display for Identifier {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
     self.0.fmt(f)
+  }
+}
+
+impl NodeContents for Identifier {}
+
+impl<'a> From<&'a str> for Node<Identifier> {
+  fn from(s: &str) -> Self {
+    Node::new(Identifier(s.to_owned()), None)
+  }
+}
+
+impl From<String> for Node<Identifier> {
+  fn from(s: String) -> Self {
+    Node::new(Identifier(s), None)
   }
 }
 
@@ -498,14 +524,14 @@ impl StructFieldSpecifier {
 /// An identifier with an optional array specifier.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArrayedIdentifier {
-  pub ident: Identifier,
+  pub ident: Node<Identifier>,
   pub array_spec: Option<ArraySpecifier>,
 }
 
 impl ArrayedIdentifier {
   pub fn new<I, AS>(ident: I, array_spec: AS) -> Self
   where
-    I: Into<Identifier>,
+    I: Into<Node<Identifier>>,
     AS: Into<Option<ArraySpecifier>>,
   {
     ArrayedIdentifier {
@@ -518,14 +544,14 @@ impl ArrayedIdentifier {
 impl<'a> From<&'a str> for ArrayedIdentifier {
   fn from(ident: &str) -> Self {
     ArrayedIdentifier {
-      ident: Identifier(ident.to_owned()),
+      ident: Identifier(ident.to_owned()).into_node(),
       array_spec: None,
     }
   }
 }
 
-impl From<Identifier> for ArrayedIdentifier {
-  fn from(ident: Identifier) -> Self {
+impl From<Node<Identifier>> for ArrayedIdentifier {
+  fn from(ident: Node<Identifier>) -> Self {
     ArrayedIdentifier {
       ident,
       array_spec: None,
@@ -582,7 +608,7 @@ pub struct LayoutQualifier {
 /// Layout qualifier spec.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayoutQualifierSpec {
-  Identifier(Identifier, Option<Box<Expr>>),
+  Identifier(Node<Identifier>, Option<Box<Expr>>),
   Shared,
 }
 
@@ -648,7 +674,7 @@ pub enum Declaration {
   InitDeclaratorList(InitDeclaratorList),
   Precision(PrecisionQualifier, TypeSpecifier),
   Block(Block),
-  Global(TypeQualifier, Vec<Identifier>),
+  Global(TypeQualifier, Vec<Node<Identifier>>),
 }
 
 impl NodeContents for Declaration {}
@@ -658,7 +684,7 @@ impl NodeContents for Declaration {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
   pub qualifier: TypeQualifier,
-  pub name: Identifier,
+  pub name: Node<Identifier>,
   pub fields: Vec<StructFieldSpecifier>,
   pub identifier: Option<ArrayedIdentifier>,
 }
@@ -666,7 +692,7 @@ pub struct Block {
 /// Function identifier.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FunIdentifier {
-  Identifier(Identifier),
+  Identifier(Node<Identifier>),
   Expr(Box<Expr>),
 }
 
@@ -683,7 +709,7 @@ impl FunIdentifier {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionPrototype {
   pub ty: FullySpecifiedType,
-  pub name: Identifier,
+  pub name: Node<Identifier>,
   pub parameters: Vec<FunctionParameterDeclaration>,
 }
 
@@ -736,7 +762,7 @@ pub struct InitDeclaratorList {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SingleDeclaration {
   pub ty: FullySpecifiedType,
-  pub name: Option<Identifier>,
+  pub name: Option<Node<Identifier>>,
   pub array_specifier: Option<ArraySpecifier>,
   pub initializer: Option<Initializer>,
 }
@@ -769,7 +795,7 @@ impl From<Expr> for Initializer {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
   /// A variable expression, using an identifier.
-  Variable(Identifier),
+  Variable(Node<Identifier>),
   /// Integral constant expression.
   IntConst(i32),
   /// Unsigned integral constant expression.
@@ -794,7 +820,7 @@ pub enum Expr {
   /// A functional call. It has a function identifier and a list of expressions (arguments).
   FunCall(FunIdentifier, Vec<Expr>),
   /// An expression associated with a field selection (struct).
-  Dot(Box<Expr>, Identifier),
+  Dot(Box<Expr>, Node<Identifier>),
   /// Post-incrementation of an expression.
   PostInc(Box<Expr>),
   /// Post-decrementation of an expression.
@@ -962,7 +988,7 @@ impl ExternalDeclaration {
   pub fn new_fn<T, N, A, S>(ret_ty: T, name: N, args: A, body: S) -> Self
   where
     T: Into<FullySpecifiedType>,
-    N: Into<Identifier>,
+    N: Into<Node<Identifier>>,
     A: IntoIterator<Item = FunctionParameterDeclaration>,
     S: IntoIterator<Item = Statement>,
   {
@@ -1072,7 +1098,7 @@ impl Statement {
   pub fn declare_var<T, N, A, I>(ty: T, name: N, array_specifier: A, initializer: I) -> Self
   where
     T: Into<FullySpecifiedType>,
-    N: Into<Identifier>,
+    N: Into<Node<Identifier>>,
     A: Into<Option<ArraySpecifier>>,
     I: Into<Option<Initializer>>,
   {
@@ -1178,7 +1204,7 @@ pub struct SelectionStatement {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Condition {
   Expr(Box<Expr>),
-  Assignment(FullySpecifiedType, Identifier, Initializer),
+  Assignment(FullySpecifiedType, Node<Identifier>, Initializer),
 }
 
 impl From<Expr> for Condition {
@@ -1272,13 +1298,13 @@ impl NodeContents for Preprocessor {}
 #[derive(Clone, Debug, PartialEq)]
 pub enum PreprocessorDefine {
   ObjectLike {
-    ident: Identifier,
+    ident: Node<Identifier>,
     value: String,
   },
 
   FunctionLike {
-    ident: Identifier,
-    args: Vec<Identifier>,
+    ident: Node<Identifier>,
+    args: Vec<Node<Identifier>>,
     value: String,
   },
 }
@@ -1304,13 +1330,13 @@ pub struct PreprocessorIf {
 /// An #ifdef preprocessor directive.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreprocessorIfDef {
-  pub ident: Identifier,
+  pub ident: Node<Identifier>,
 }
 
 /// A #ifndef preprocessor directive.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreprocessorIfNDef {
-  pub ident: Identifier,
+  pub ident: Node<Identifier>,
 }
 
 /// An #include name annotation.
@@ -1336,7 +1362,7 @@ pub struct PreprocessorPragma {
 /// A #undef preprocessor directive.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreprocessorUndef {
-  pub name: Identifier,
+  pub name: Node<Identifier>,
 }
 
 /// A #version preprocessor directive.

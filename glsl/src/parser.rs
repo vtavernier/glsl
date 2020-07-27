@@ -119,7 +119,7 @@ macro_rules! impl_parse {
   };
 }
 
-impl_parse!(syntax::Identifier, identifier);
+impl_parse!(syntax::Identifier, identifier => contents);
 impl_parse!(syntax::TypeSpecifierNonArray, type_specifier_non_array);
 impl_parse!(syntax::TypeSpecifier, type_specifier);
 impl_parse!(syntax::UnaryOp, unary_op);

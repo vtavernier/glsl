@@ -118,8 +118,10 @@ pub fn string<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String>
 }
 
 /// Parse an identifier.
-pub fn identifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Identifier> {
-  map(string, syntax::Identifier)(i)
+pub fn identifier<'d, 'c: 'd>(
+  i: ParseInput<'c, 'd>,
+) -> ParserResult<'c, 'd, syntax::Node<syntax::Identifier>> {
+  parse_located!(i, { map(string, syntax::Identifier)(i) })
 }
 
 /// Parse a type name.
@@ -877,7 +879,7 @@ pub fn parens_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, sy
 /// Parse a dot field selection identifier.
 pub fn dot_field_selection<'d, 'c: 'd>(
   i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Identifier> {
+) -> ParserResult<'c, 'd, syntax::Node<syntax::Identifier>> {
   preceded(terminated(char('.'), blank), cut(identifier))(i)
 }
 
@@ -1069,7 +1071,7 @@ fn function_declarator<'d, 'c: 'd>(
 
 fn function_header<'d, 'c: 'd>(
   i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, (syntax::FullySpecifiedType, syntax::Identifier)> {
+) -> ParserResult<'c, 'd, (syntax::FullySpecifiedType, syntax::Node<syntax::Identifier>)> {
   pair(
     terminated(fully_specified_type, blank),
     terminated(identifier, terminated(blank, char('('))),
@@ -1856,7 +1858,7 @@ pub(crate) fn pp_define<'d, 'c: 'd>(
 
 // Parse an object-like #define content.
 pub(crate) fn pp_define_object_like<'d, 'c: 'd>(
-  ident: syntax::Identifier,
+  ident: syntax::Node<syntax::Identifier>,
 ) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
   move |i| {
     map(preceded(pp_space0, cut(str_till_eol)), |value| {
@@ -1870,7 +1872,7 @@ pub(crate) fn pp_define_object_like<'d, 'c: 'd>(
 
 // Parse a function-like #define content.
 pub(crate) fn pp_define_function_like<'d, 'c: 'd>(
-  ident: syntax::Identifier,
+  ident: syntax::Node<syntax::Identifier>,
 ) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
   move |i| {
     map(

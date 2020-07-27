@@ -53,7 +53,7 @@ macro_rules! impl_tokenize {
   };
 }
 
-impl_tokenize!(syntax::Identifier, tokenize_identifier);
+impl_tokenize!(syntax::Node<syntax::Identifier>, tokenize_identifier);
 impl_tokenize!(syntax::TypeName, tokenize_type_name);
 impl_tokenize!(
   syntax::TypeSpecifierNonArray,
@@ -127,9 +127,10 @@ impl_tokenize!(
   tokenize_preprocessor_extension
 );
 
-fn tokenize_identifier(i: &syntax::Identifier) -> TokenStream {
+fn tokenize_identifier(i: &syntax::Node<syntax::Identifier>) -> TokenStream {
   let i = i.quote();
-  quote! { #i }
+  // TODO: Store span id in generated code?
+  quote! { glsl::syntax::Node::new(#i, None) }
 }
 
 fn tokenize_path(p: &syntax::Path) -> TokenStream {
@@ -496,7 +497,7 @@ fn tokenize_array_spec_dim(a: &syntax::ArraySpecifierDimension) -> TokenStream {
 }
 
 fn tokenize_arrayed_identifier(identifier: &syntax::ArrayedIdentifier) -> TokenStream {
-  let ident = identifier.ident.quote();
+  let ident = tokenize_identifier(&identifier.ident);
   let array_spec = identifier
     .array_spec
     .as_ref()
@@ -589,7 +590,7 @@ fn tokenize_layout_qualifier(l: &syntax::LayoutQualifier) -> TokenStream {
 fn tokenize_layout_qualifier_spec(l: &syntax::LayoutQualifierSpec) -> TokenStream {
   match *l {
     syntax::LayoutQualifierSpec::Identifier(ref i, ref e) => {
-      let i = i.quote();
+      let i = tokenize_identifier(i);
       let expr = e
         .as_ref()
         .map(|e| Box::new(tokenize_expr(&e)).quote())
@@ -624,7 +625,7 @@ fn tokenize_interpolation_qualifier(i: &syntax::InterpolationQualifier) -> Token
 fn tokenize_expr(expr: &syntax::Expr) -> TokenStream {
   match *expr {
     syntax::Expr::Variable(ref i) => {
-      let i = i.quote();
+      let i = tokenize_identifier(i);
       quote! { glsl::syntax::Expr::Variable(#i) }
     }
 
@@ -679,7 +680,7 @@ fn tokenize_expr(expr: &syntax::Expr) -> TokenStream {
 
     syntax::Expr::Dot(ref e, ref i) => {
       let e = Box::new(tokenize_expr(e)).quote();
-      let i = i.quote();
+      let i = tokenize_identifier(i);
 
       quote! { glsl::syntax::Expr::Dot(#e, #i) }
     }
@@ -792,7 +793,7 @@ fn tokenize_declaration(d: &syntax::Declaration) -> TokenStream {
 
     syntax::Declaration::Global(ref qual, ref identifiers) => {
       let qual = tokenize_type_qualifier(qual);
-      let identifiers = identifiers.iter().map(|i| i.quote());
+      let identifiers = identifiers.iter().map(|i| tokenize_identifier(i));
 
       quote! { glsl::syntax::Declaration::Global(#qual, vec![#(#identifiers),*]) }
     }
@@ -801,7 +802,7 @@ fn tokenize_declaration(d: &syntax::Declaration) -> TokenStream {
 
 fn tokenize_function_prototype(fp: &syntax::FunctionPrototype) -> TokenStream {
   let ty = tokenize_fully_specified_type(&fp.ty);
-  let name = fp.name.quote();
+  let name = tokenize_identifier(&fp.name);
   let params = fp
     .parameters
     .iter()
@@ -860,7 +861,7 @@ fn tokenize_init_declarator_list(i: &syntax::InitDeclaratorList) -> TokenStream 
 
 fn tokenize_single_declaration(d: &syntax::SingleDeclaration) -> TokenStream {
   let ty = tokenize_fully_specified_type(&d.ty);
-  let name = d.name.as_ref().map(|i| i.quote()).quote();
+  let name = d.name.as_ref().map(|i| tokenize_identifier(i)).quote();
   let array_specifier = d.array_specifier.as_ref().map(tokenize_array_spec).quote();
   let initializer = d.initializer.as_ref().map(tokenize_initializer).quote();
 

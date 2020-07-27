@@ -1,5 +1,6 @@
 use crate::parsers::*;
 use crate::syntax;
+use crate::syntax::NodeContents;
 
 fn assert_eq_parser<'d, 'c: 'd, R: PartialEq + std::fmt::Debug>(
   parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, R>,
@@ -21,7 +22,40 @@ fn assert_eq_parser<'d, 'c: 'd, R: PartialEq + std::fmt::Debug>(
   );
 }
 
-fn assert_eq_parser_1<'d, 'c: 'd, R: syntax::NodeContents>(
+fn assert_eq_parser_span<'d, 'c: 'd, R: NodeContents>(
+  parser: impl FnOnce(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Node<R>>,
+  input: &'c str,
+  output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
+  ctx: &'d ParseContext<'c>,
+  span_assert: impl FnOnce(&syntax::NodeSpan) -> (),
+) {
+  let mut span_id = None;
+
+  let res = parser(ParseInput::new(input, ctx))
+    .map(|(a, b)| {
+      span_id = Some(b.span_id);
+      (a.fragment(), b.contents)
+    })
+    .map_err(|e| {
+      e.map(|e| nom::error::VerboseError {
+        errors: e
+          .errors
+          .into_iter()
+          .map(|(i, k)| (i.fragment(), k))
+          .collect(),
+      })
+    });
+
+  assert_eq!(res, output);
+
+  if let Some(span_id) = span_id {
+    if let Ok((_, _)) = res {
+      span_assert(ctx.data().get_span(span_id).unwrap());
+    }
+  }
+}
+
+fn assert_eq_parser_1<'d, 'c: 'd, R: NodeContents>(
   parser: impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Node<R>>,
   input: &'c str,
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
@@ -344,13 +378,39 @@ fn parse_bool_lit() {
 
 #[test]
 fn parse_identifier() {
-  let ctx = ParseContext::new();
+  let ctx = ParseContext::with_spans();
 
-  assert_eq_parser(identifier, "a", Ok(("", "a".into())), &ctx);
-  assert_eq_parser(identifier, "ab_cd", Ok(("", "ab_cd".into())), &ctx);
-  assert_eq_parser(identifier, "Ab_cd", Ok(("", "Ab_cd".into())), &ctx);
-  assert_eq_parser(identifier, "Ab_c8d", Ok(("", "Ab_c8d".into())), &ctx);
-  assert_eq_parser(identifier, "Ab_c8d9", Ok(("", "Ab_c8d9".into())), &ctx);
+  assert_eq_parser_span(identifier, "a", Ok(("", "a".into())), &ctx, |span| {
+    assert_eq!(span.offset, 0)
+  });
+  assert_eq_parser_span(
+    identifier,
+    "ab_cd",
+    Ok(("", "ab_cd".into())),
+    &ctx,
+    |span| assert_eq!(span.offset, 0),
+  );
+  assert_eq_parser_span(
+    identifier,
+    "Ab_cd",
+    Ok(("", "Ab_cd".into())),
+    &ctx,
+    |span| assert_eq!(span.offset, 0),
+  );
+  assert_eq_parser_span(
+    identifier,
+    "Ab_c8d",
+    Ok(("", "Ab_c8d".into())),
+    &ctx,
+    |span| assert_eq!(span.offset, 0),
+  );
+  assert_eq_parser_span(
+    identifier,
+    "Ab_c8d9",
+    Ok(("", "Ab_c8d9".into())),
+    &ctx,
+    |span| assert_eq!(span.offset, 0),
+  );
 }
 
 #[test]
@@ -3597,8 +3657,8 @@ fn parse_pp_define_with_args() {
   let expected = syntax::Preprocessor::Define(syntax::PreprocessorDefine::FunctionLike {
     ident: "add".into(),
     args: vec![
-      syntax::Identifier::new("x").unwrap(),
-      syntax::Identifier::new("y").unwrap(),
+      syntax::Identifier::new("x").unwrap().into_node(),
+      syntax::Identifier::new("y").unwrap().into_node(),
     ],
     value: "(x + y)".to_owned(),
   });
@@ -3722,7 +3782,7 @@ fn parse_pp_ifdef() {
     Ok((
       "",
       syntax::Preprocessor::IfDef(syntax::PreprocessorIfDef {
-        ident: syntax::Identifier("FOO".to_owned()),
+        ident: syntax::Identifier("FOO".to_owned()).into_node(),
       }),
     )),
     &ctx,
@@ -3739,7 +3799,7 @@ fn parse_pp_ifndef() {
     Ok((
       "",
       syntax::Preprocessor::IfNDef(syntax::PreprocessorIfNDef {
-        ident: syntax::Identifier("FOO".to_owned()),
+        ident: syntax::Identifier("FOO".to_owned()).into_node(),
       }),
     )),
     &ctx,
@@ -3833,7 +3893,7 @@ fn parse_pp_undef() {
     Ok((
       "",
       syntax::Preprocessor::Undef(syntax::PreprocessorUndef {
-        name: syntax::Identifier("FOO".to_owned()),
+        name: syntax::Identifier("FOO".to_owned()).into_node(),
       }),
     )),
     &ctx,

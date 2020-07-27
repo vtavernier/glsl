@@ -403,6 +403,15 @@ where
   }
 }
 
+impl<T: syntax::NodeContents + Host> Host for syntax::Node<T> {
+  fn visit<V>(&mut self, visitor: &mut V)
+  where
+    V: Visitor,
+  {
+    self.contents.visit(visitor)
+  }
+}
+
 impl Host for syntax::TranslationUnit {
   fn visit<V>(&mut self, visitor: &mut V)
   where
