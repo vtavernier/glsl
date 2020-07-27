@@ -117,10 +117,10 @@ fn parse_uniline_comment() {
     Ok(("", syntax::Comment::Single(" lol"))),
     &mut data,
   );
-  let cmt = data.comments().as_ref().unwrap();
+  let cmt = data.comments().unwrap();
   assert_eq!(cmt.len(), 1);
-  assert_eq!(cmt[0].text(), " lol");
-  let span = data.get_span(cmt[0].span_id).unwrap();
+  assert_eq!(cmt[&1].text(), " lol");
+  let span = data.get_span(cmt[&1].span_id).unwrap();
   assert_eq!(span.offset, 0);
   assert_eq!(span.length, 6);
 
@@ -131,9 +131,9 @@ fn parse_uniline_comment() {
     Ok(("foo", syntax::Comment::Single(" lol"))),
     &mut data,
   );
-  let cmt = data.comments().as_ref().unwrap();
+  let cmt = data.comments().unwrap();
   assert_eq!(cmt.len(), 1);
-  assert_eq!(cmt[0].text(), " lol");
+  assert_eq!(cmt[&1].text(), " lol");
 
   let mut data = ParseContextData::with_comments();
   assert_eq_parser(
@@ -142,9 +142,9 @@ fn parse_uniline_comment() {
     Ok(("", syntax::Comment::Single(" lol\\\nfoo"))),
     &mut data,
   );
-  let cmt = data.comments().as_ref().unwrap();
+  let cmt = data.comments().unwrap();
   assert_eq!(cmt.len(), 1);
-  assert_eq!(cmt[0].text(), " lol\\\nfoo");
+  assert_eq!(cmt[&1].text(), " lol\\\nfoo");
 
   let mut data = ParseContextData::with_comments();
   assert_eq_parser(
@@ -153,9 +153,9 @@ fn parse_uniline_comment() {
     Ok(("", syntax::Comment::Single(" lol   \\\n   foo"))),
     &mut data,
   );
-  let cmt = data.comments().as_ref().unwrap();
+  let cmt = data.comments().unwrap();
   assert_eq!(cmt.len(), 1);
-  assert_eq!(cmt[0].text(), " lol   \\\n   foo");
+  assert_eq!(cmt[&1].text(), " lol   \\\n   foo");
 }
 
 #[test]

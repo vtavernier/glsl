@@ -26,8 +26,12 @@ use std::ops::{Deref, DerefMut};
 use crate::parsers::ParseInput;
 
 /// Span information for a node, constructed from a nom_locate::LocatedSpan
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord)]
 pub struct NodeSpan {
+  /// The index of this span into the list of parsed units. This is used to
+  /// identify which source string this span refers to when combining multiple ASTs
+  pub source_id: usize,
+
   /// The offset represents the position of the fragment relatively to
   /// the input of the parser. It starts at offset 0.
   pub offset: usize,
@@ -40,13 +44,64 @@ pub struct NodeSpan {
   pub length: usize,
 }
 
-impl std::convert::From<ParseInput<'_, '_, '_>> for NodeSpan {
-  fn from(span: ParseInput<'_, '_, '_>) -> Self {
+impl NodeSpan {
+  /// Return a 0-length span located at the start of the given source
+  ///
+  /// This may be used in span range queries.
+  pub fn new_start(source_id: usize) -> Self {
     Self {
+      source_id,
+      offset: 0,
+      line: 1,
+      length: 0,
+    }
+  }
+
+  /// Return a 0-length span located at the end of the given source (as indicated by the offset)
+  ///
+  /// This may be used in span range queries.
+  pub fn new_end(source_id: usize, length: usize) -> Self {
+    Self {
+      source_id,
+      offset: length,
+      line: 1,
+      length: 0,
+    }
+  }
+
+  /// Return a 0-length span located at the end point of this span.
+  ///
+  /// This may be used in span range queries. Note that the line and column information will not be
+  /// accurate.
+  pub fn to_end_location(&self) -> Self {
+    Self {
+      source_id: self.source_id,
+      line: self.line,
+      offset: self.offset + self.length,
+      length: 0,
+    }
+  }
+}
+
+impl std::convert::From<(usize, ParseInput<'_, '_, '_>)> for NodeSpan {
+  fn from((source_id, span): (usize, ParseInput<'_, '_, '_>)) -> Self {
+    Self {
+      source_id,
       offset: span.location_offset(),
       line: span.location_line(),
       length: span.fragment().len(),
     }
+  }
+}
+
+impl std::cmp::PartialOrd for NodeSpan {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    Some(self.source_id.cmp(&other.source_id).then_with(|| {
+      self
+        .offset
+        .cmp(&other.offset)
+        .then_with(|| other.length.cmp(&self.length))
+    }))
   }
 }
 

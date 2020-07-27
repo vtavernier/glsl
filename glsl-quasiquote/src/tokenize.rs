@@ -1417,12 +1417,13 @@ fn tokenize_preprocessor_extension_behavior(
 
 fn tokenize_span(s: &syntax::NodeSpan) -> TokenStream {
   let syntax::NodeSpan {
+    source_id,
     offset,
     line,
     length,
   } = s;
 
-  quote! { glsl::syntax::NodeSpan { offset: #offset, line: #line, length: #length } }
+  quote! { glsl::syntax::NodeSpan { source_id: #source_id, offset: #offset, line: #line, length: #length } }
 }
 
 fn tokenize_external_declaration(ed: &syntax::Node<syntax::ExternalDeclaration>) -> TokenStream {

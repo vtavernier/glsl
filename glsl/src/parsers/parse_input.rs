@@ -5,10 +5,16 @@ use nom_locate::LocatedSpan;
 
 use crate::syntax;
 
+pub type ContextComments<'s> = std::collections::HashMap<usize, syntax::Node<syntax::Comment<'s>>>;
+pub type ContextSpans = bimap::BiBTreeMap<syntax::NodeSpan, NonZeroUsize>;
+
 #[derive(Debug, Clone)]
 pub struct ParseContextData<'s> {
-  comments: Option<Vec<syntax::Node<syntax::Comment<'s>>>>,
-  spans: Option<Vec<syntax::NodeSpan>>,
+  comments: Option<ContextComments<'s>>,
+  spans: Option<ContextSpans>,
+  current_id: NonZeroUsize,
+  current_source: usize,
+  source_ends: Vec<usize>,
 }
 
 impl<'s> ParseContextData<'s> {
@@ -16,6 +22,9 @@ impl<'s> ParseContextData<'s> {
     Self {
       comments: None,
       spans: None,
+      current_id: unsafe { NonZeroUsize::new_unchecked(1) },
+      current_source: 0,
+      source_ends: Vec::new(),
     }
   }
 
@@ -23,6 +32,9 @@ impl<'s> ParseContextData<'s> {
     Self {
       comments: None,
       spans: Some(Default::default()),
+      current_id: unsafe { NonZeroUsize::new_unchecked(1) },
+      current_source: 0,
+      source_ends: Vec::new(),
     }
   }
 
@@ -30,27 +42,52 @@ impl<'s> ParseContextData<'s> {
     Self {
       comments: Some(Default::default()),
       spans: Some(Default::default()),
+      current_id: unsafe { NonZeroUsize::new_unchecked(1) },
+      current_source: 0,
+      source_ends: Vec::new(),
     }
   }
 
-  pub fn comments(&self) -> &Option<Vec<syntax::Node<syntax::Comment<'s>>>> {
-    &self.comments
+  pub fn comments(&self) -> Option<&ContextComments<'s>> {
+    self.comments.as_ref()
   }
 
-  pub fn spans(&self) -> &Option<Vec<syntax::NodeSpan>> {
-    &self.spans
+  pub fn spans(&self) -> Option<&ContextSpans> {
+    self.spans.as_ref()
   }
 
   pub fn get_span(&self, span_id: Option<NonZeroUsize>) -> Option<&syntax::NodeSpan> {
     if let (Some(id), Some(spans)) = (span_id, self.spans.as_ref()) {
-      let id = id.get() - 1;
-
-      if spans.len() > id {
-        return Some(&spans[id]);
-      }
+      return spans.get_by_right(&id);
     }
 
     None
+  }
+
+  pub fn get_source(&self) -> Option<usize> {
+    if self.current_source == 0 {
+      None
+    } else {
+      Some(self.current_source - 1)
+    }
+  }
+
+  pub fn source_end(&self, source_id: usize) -> Option<syntax::NodeSpan> {
+    if source_id < self.current_source {
+      return Some(syntax::NodeSpan::new_end(
+        source_id,
+        self.source_ends[source_id],
+      ));
+    }
+
+    None
+  }
+
+  fn next_source(&mut self) -> usize {
+    let res = self.current_source;
+    self.current_source += 1;
+    self.source_ends.push(0);
+    res
   }
 
   fn commit_span<T: syntax::NodeContents>(
@@ -58,11 +95,27 @@ impl<'s> ParseContextData<'s> {
     contents: T,
     span: syntax::NodeSpan,
   ) -> syntax::Node<T> {
-    let span_id = if let Some(s) = &mut self.spans {
-      s.push(span);
+    assert!(
+      span.source_id < self.current_source,
+      "span.source_id is out of range"
+    );
 
-      let span_id = s.len();
-      Some(unsafe { NonZeroUsize::new_unchecked(span_id) })
+    let span_id = if let Some(s) = &mut self.spans {
+      if let Some(existing) = s.get_by_left(&span) {
+        Some(*existing)
+      } else {
+        let span_id = self.current_id;
+        self.current_id = NonZeroUsize::new(span_id.get() + 1).unwrap();
+
+        s.insert_no_overwrite(span, span_id)
+          .expect("another span covering the same range already exists");
+
+        if let Some(se) = self.source_ends.get_mut(span.source_id) {
+          *se = (*se).max(span.offset + span.length);
+        }
+
+        Some(span_id)
+      }
     } else {
       None
     };
@@ -74,6 +127,7 @@ impl<'s> ParseContextData<'s> {
 #[derive(Debug)]
 pub(crate) struct ParseContext<'s, 'd> {
   data: RefCell<&'d mut ParseContextData<'s>>,
+  source_id: usize,
 }
 
 pub(crate) struct ContextData<'b, 's, 'd> {
@@ -90,23 +144,30 @@ impl<'s> std::ops::Deref for ContextData<'_, 's, '_> {
 
 impl<'s, 'd> ParseContext<'s, 'd> {
   pub fn new(data: &'d mut ParseContextData<'s>) -> Self {
+    let source_id = data.next_source();
+
     Self {
       data: RefCell::new(data),
+      source_id,
     }
   }
 
   pub fn add_comment(&self, cmt: syntax::Node<syntax::Comment<'s>>) {
     if let Some(c) = self.data.borrow_mut().comments.as_mut() {
-      c.push(cmt);
+      // If we're tracking comments we are also tracking spans
+      c.insert(cmt.span_id.unwrap().get(), cmt);
     }
   }
 
   pub fn commit_span<T: syntax::NodeContents>(
     &self,
     contents: T,
-    span: syntax::NodeSpan,
+    span: ParseInput,
   ) -> syntax::Node<T> {
-    self.data.borrow_mut().commit_span(contents, span)
+    self
+      .data
+      .borrow_mut()
+      .commit_span(contents, (self.source_id, span).into())
   }
 }
 

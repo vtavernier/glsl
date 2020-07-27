@@ -44,8 +44,7 @@ macro_rules! parse_located {
       $i,
       s.context.commit_span(
         res,
-        s.slice(0..(end.location_offset() - start.location_offset()))
-          .into(),
+        s.slice(0..(end.location_offset() - start.location_offset())),
       ),
     ))
   }};
