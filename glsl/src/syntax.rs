@@ -40,8 +40,8 @@ pub struct NodeSpan {
   pub length: usize,
 }
 
-impl std::convert::From<ParseInput<'_, '_>> for NodeSpan {
-  fn from(span: ParseInput<'_, '_>) -> Self {
+impl std::convert::From<ParseInput<'_, '_, '_>> for NodeSpan {
+  fn from(span: ParseInput<'_, '_, '_>) -> Self {
     Self {
       offset: span.location_offset(),
       line: span.location_line(),

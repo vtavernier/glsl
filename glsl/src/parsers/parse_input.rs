@@ -12,6 +12,27 @@ pub struct ParseContextData<'s> {
 }
 
 impl<'s> ParseContextData<'s> {
+  pub fn new() -> Self {
+    Self {
+      comments: None,
+      spans: None,
+    }
+  }
+
+  pub fn with_spans() -> Self {
+    Self {
+      comments: None,
+      spans: Some(Default::default()),
+    }
+  }
+
+  pub fn with_comments() -> Self {
+    Self {
+      comments: Some(Default::default()),
+      spans: Some(Default::default()),
+    }
+  }
+
   pub fn comments(&self) -> &Option<Vec<syntax::Node<syntax::Comment<'s>>>> {
     &self.comments
   }
@@ -31,18 +52,35 @@ impl<'s> ParseContextData<'s> {
 
     None
   }
+
+  fn commit_span<T: syntax::NodeContents>(
+    &mut self,
+    contents: T,
+    span: syntax::NodeSpan,
+  ) -> syntax::Node<T> {
+    let span_id = if let Some(s) = &mut self.spans {
+      s.push(span);
+
+      let span_id = s.len();
+      Some(unsafe { NonZeroUsize::new_unchecked(span_id) })
+    } else {
+      None
+    };
+
+    syntax::Node::new(contents, span_id)
+  }
 }
 
-#[derive(Debug, Clone)]
-pub struct ParseContext<'s> {
-  data: RefCell<ParseContextData<'s>>,
+#[derive(Debug)]
+pub(crate) struct ParseContext<'s, 'd> {
+  data: RefCell<&'d mut ParseContextData<'s>>,
 }
 
-pub struct ContextData<'b, 's> {
-  guard: std::cell::Ref<'b, ParseContextData<'s>>,
+pub(crate) struct ContextData<'b, 's, 'd> {
+  guard: std::cell::Ref<'b, &'d mut ParseContextData<'s>>,
 }
 
-impl<'s> std::ops::Deref for ContextData<'_, 's> {
+impl<'s> std::ops::Deref for ContextData<'_, 's, '_> {
   type Target = ParseContextData<'s>;
 
   fn deref(&self) -> &Self::Target {
@@ -50,31 +88,10 @@ impl<'s> std::ops::Deref for ContextData<'_, 's> {
   }
 }
 
-impl<'s> ParseContext<'s> {
-  pub fn new() -> Self {
+impl<'s, 'd> ParseContext<'s, 'd> {
+  pub fn new(data: &'d mut ParseContextData<'s>) -> Self {
     Self {
-      data: RefCell::new(ParseContextData {
-        comments: None,
-        spans: None,
-      }),
-    }
-  }
-
-  pub fn with_spans() -> Self {
-    Self {
-      data: RefCell::new(ParseContextData {
-        comments: None,
-        spans: Some(Vec::new()),
-      }),
-    }
-  }
-
-  pub fn with_comments() -> Self {
-    Self {
-      data: RefCell::new(ParseContextData {
-        comments: Some(Vec::new()),
-        spans: Some(Vec::new()),
-      }),
+      data: RefCell::new(data),
     }
   }
 
@@ -84,41 +101,23 @@ impl<'s> ParseContext<'s> {
     }
   }
 
-  pub fn data(&self) -> ContextData<'_, 's> {
-    ContextData {
-      guard: self.data.borrow(),
-    }
-  }
-
-  pub fn into_data(self) -> ParseContextData<'s> {
-    self.data.into_inner()
-  }
-
   pub fn commit_span<T: syntax::NodeContents>(
     &self,
     contents: T,
     span: syntax::NodeSpan,
   ) -> syntax::Node<T> {
-    let span_id = if let Some(c) = self.data.borrow_mut().spans.as_mut() {
-      c.push(span);
-      // SAFETY: c.len() will always be > 0
-      Some(unsafe { NonZeroUsize::new_unchecked(c.len()) })
-    } else {
-      None
-    };
-
-    syntax::Node::new(contents, span_id)
+    self.data.borrow_mut().commit_span(contents, span)
   }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ParseInput<'c: 'd, 'd> {
+pub(crate) struct ParseInput<'c, 'd, 'e> {
   pub input: LocatedSpan<&'c str>,
-  pub context: &'d ParseContext<'c>,
+  pub context: &'e ParseContext<'c, 'd>,
 }
 
-impl<'c, 'd> ParseInput<'c, 'd> {
-  pub fn new(input: &'c str, context: &'d ParseContext<'c>) -> Self {
+impl<'c, 'd, 'e> ParseInput<'c, 'd, 'e> {
+  pub fn new(input: &'c str, context: &'e ParseContext<'c, 'd>) -> Self {
     Self {
       input: LocatedSpan::new(input),
       context,
@@ -130,13 +129,13 @@ impl<'c, 'd> ParseInput<'c, 'd> {
   }
 }
 
-impl<'c> AsRef<str> for ParseInput<'c, '_> {
+impl<'c> AsRef<str> for ParseInput<'c, '_, '_> {
   fn as_ref(&self) -> &str {
     self.fragment()
   }
 }
 
-impl<'c> std::ops::Deref for ParseInput<'c, '_> {
+impl<'c> std::ops::Deref for ParseInput<'c, '_, '_> {
   type Target = LocatedSpan<&'c str>;
 
   fn deref(&self) -> &Self::Target {
@@ -144,25 +143,25 @@ impl<'c> std::ops::Deref for ParseInput<'c, '_> {
   }
 }
 
-impl std::cmp::PartialEq for ParseInput<'_, '_> {
+impl std::cmp::PartialEq for ParseInput<'_, '_, '_> {
   fn eq(&self, other: &Self) -> bool {
     self.input.eq(&other.input)
   }
 }
 
-impl std::fmt::Display for ParseInput<'_, '_> {
+impl std::fmt::Display for ParseInput<'_, '_, '_> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     self.input.fmt(f)
   }
 }
 
-impl nom::AsBytes for ParseInput<'_, '_> {
+impl nom::AsBytes for ParseInput<'_, '_, '_> {
   fn as_bytes(&self) -> &[u8] {
     self.input.as_bytes()
   }
 }
 
-impl<'a> nom::Compare<&'a str> for ParseInput<'_, '_> {
+impl<'a> nom::Compare<&'a str> for ParseInput<'_, '_, '_> {
   fn compare(&self, t: &'a str) -> nom::CompareResult {
     self.input.compare(t)
   }
@@ -172,17 +171,17 @@ impl<'a> nom::Compare<&'a str> for ParseInput<'_, '_> {
   }
 }
 
-impl<'a, 'b, 'c, 'd> nom::Compare<ParseInput<'a, 'b>> for ParseInput<'c, 'd> {
-  fn compare(&self, t: ParseInput<'a, 'b>) -> nom::CompareResult {
+impl<'a, 'b, 'c, 'd> nom::Compare<ParseInput<'a, 'b, '_>> for ParseInput<'c, 'd, '_> {
+  fn compare(&self, t: ParseInput<'a, 'b, '_>) -> nom::CompareResult {
     self.input.compare(t.input)
   }
 
-  fn compare_no_case(&self, t: ParseInput<'a, 'b>) -> nom::CompareResult {
+  fn compare_no_case(&self, t: ParseInput<'a, 'b, '_>) -> nom::CompareResult {
     self.input.compare(t.input)
   }
 }
 
-impl<'c, 'd> nom::ExtendInto for ParseInput<'c, 'd> {
+impl<'c, 'd> nom::ExtendInto for ParseInput<'c, 'd, '_> {
   type Item = <LocatedSpan<&'c str> as nom::ExtendInto>::Item;
   type Extender = <LocatedSpan<&'c str> as nom::ExtendInto>::Extender;
 
@@ -195,13 +194,13 @@ impl<'c, 'd> nom::ExtendInto for ParseInput<'c, 'd> {
   }
 }
 
-impl<'c> nom::FindSubstring<&'c str> for ParseInput<'c, '_> {
+impl<'c> nom::FindSubstring<&'c str> for ParseInput<'c, '_, '_> {
   fn find_substring(&self, substr: &'c str) -> Option<usize> {
     self.input.find_substring(substr)
   }
 }
 
-impl nom::HexDisplay for ParseInput<'_, '_> {
+impl nom::HexDisplay for ParseInput<'_, '_, '_> {
   fn to_hex(&self, chunk_size: usize) -> String {
     self.input.to_hex(chunk_size)
   }
@@ -211,7 +210,7 @@ impl nom::HexDisplay for ParseInput<'_, '_> {
   }
 }
 
-impl<'c> nom::InputIter for ParseInput<'c, '_> {
+impl<'c> nom::InputIter for ParseInput<'c, '_, '_> {
   type Item = <LocatedSpan<&'c str> as nom::InputIter>::Item;
   type Iter = <LocatedSpan<&'c str> as nom::InputIter>::Iter;
   type IterElem = <LocatedSpan<&'c str> as nom::InputIter>::IterElem;
@@ -236,13 +235,13 @@ impl<'c> nom::InputIter for ParseInput<'c, '_> {
   }
 }
 
-impl nom::InputLength for ParseInput<'_, '_> {
+impl nom::InputLength for ParseInput<'_, '_, '_> {
   fn input_len(&self) -> usize {
     self.input.input_len()
   }
 }
 
-impl nom::InputTake for ParseInput<'_, '_> {
+impl nom::InputTake for ParseInput<'_, '_, '_> {
   fn take(&self, count: usize) -> Self {
     Self {
       input: self.input.take(count),
@@ -266,7 +265,7 @@ impl nom::InputTake for ParseInput<'_, '_> {
 }
 
 // Taken from nom_locate because of the generic E type
-impl<'c> nom::InputTakeAtPosition for ParseInput<'c, '_> {
+impl<'c> nom::InputTakeAtPosition for ParseInput<'c, '_, '_> {
   type Item = <LocatedSpan<&'c str> as nom::InputTakeAtPosition>::Item;
 
   fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
@@ -340,19 +339,19 @@ impl<'c> nom::InputTakeAtPosition for ParseInput<'c, '_> {
   }
 }
 
-impl nom::Offset for ParseInput<'_, '_> {
+impl nom::Offset for ParseInput<'_, '_, '_> {
   fn offset(&self, second: &Self) -> usize {
     self.input.offset(&second.input)
   }
 }
 
-impl<R: std::str::FromStr> nom::ParseTo<R> for ParseInput<'_, '_> {
+impl<R: std::str::FromStr> nom::ParseTo<R> for ParseInput<'_, '_, '_> {
   fn parse_to(&self) -> Option<R> {
     self.input.parse_to()
   }
 }
 
-impl nom::Slice<std::ops::Range<usize>> for ParseInput<'_, '_> {
+impl nom::Slice<std::ops::Range<usize>> for ParseInput<'_, '_, '_> {
   fn slice(&self, range: std::ops::Range<usize>) -> Self {
     Self {
       input: self.input.slice(range),
@@ -361,7 +360,7 @@ impl nom::Slice<std::ops::Range<usize>> for ParseInput<'_, '_> {
   }
 }
 
-impl nom::Slice<std::ops::RangeFrom<usize>> for ParseInput<'_, '_> {
+impl nom::Slice<std::ops::RangeFrom<usize>> for ParseInput<'_, '_, '_> {
   fn slice(&self, range: std::ops::RangeFrom<usize>) -> Self {
     Self {
       input: self.input.slice(range),
@@ -370,7 +369,7 @@ impl nom::Slice<std::ops::RangeFrom<usize>> for ParseInput<'_, '_> {
   }
 }
 
-impl nom::Slice<std::ops::RangeFull> for ParseInput<'_, '_> {
+impl nom::Slice<std::ops::RangeFull> for ParseInput<'_, '_, '_> {
   fn slice(&self, range: std::ops::RangeFull) -> Self {
     Self {
       input: self.input.slice(range),
@@ -379,7 +378,7 @@ impl nom::Slice<std::ops::RangeFull> for ParseInput<'_, '_> {
   }
 }
 
-impl nom::Slice<std::ops::RangeTo<usize>> for ParseInput<'_, '_> {
+impl nom::Slice<std::ops::RangeTo<usize>> for ParseInput<'_, '_, '_> {
   fn slice(&self, range: std::ops::RangeTo<usize>) -> Self {
     Self {
       input: self.input.slice(range),

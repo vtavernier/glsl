@@ -12,14 +12,18 @@ use nom::{AsBytes, InputLength, Slice};
 
 use super::ParseInput;
 
-pub type ParserResult<'c, 'd, O> = IResult<ParseInput<'c, 'd>, O, VerboseError<ParseInput<'c, 'd>>>;
+pub(crate) type ParserResult<'c, 'd, 'e, O> =
+  IResult<ParseInput<'c, 'd, 'e>, O, VerboseError<ParseInput<'c, 'd, 'e>>>;
 
 // A constant parser that just forwards the value it’s parametered with without reading anything
 // from the input. Especially useful as “fallback” in an alternative parser.
-pub fn cnst<'a, 'b, T, E>(t: T) -> impl Fn(ParseInput<'a, 'b>) -> Result<(ParseInput<'a, 'b>, T), E>
+pub(crate) fn cnst<'c, 'd, 'e, T, E>(
+  t: T,
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> Result<(ParseInput<'c, 'd, 'e>, T), E>
 where
-  T: 'a + Clone,
-  'a: 'b,
+  'c: 'd + 'e,
+  'd: 'e,
+  T: 'c + Clone,
 {
   move |i| Ok((i, t.clone()))
 }
@@ -27,7 +31,7 @@ where
 // End-of-input parser.
 //
 // Yields `()` if the parser is at the end of the input; an error otherwise.
-pub fn eoi<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+pub(crate) fn eoi<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   if i.input_len() == 0 {
     Ok((i, ()))
   } else {
@@ -41,7 +45,7 @@ pub fn eoi<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
 //
 // - A newline.
 // - The end of input.
-pub fn eol<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+pub(crate) fn eol<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   alt((
     eoi, // this one goes first because it’s very cheap
     value((), newline),
@@ -49,14 +53,15 @@ pub fn eol<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
 }
 
 // Apply the `f` parser until `g` succeeds. Both parsers consume the input.
-pub fn till<'c, 'd, A, B, F, G>(
+pub(crate) fn till<'c, 'd, 'e, A, B, F, G>(
   f: F,
   g: G,
-) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()>
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()>
 where
-  'c: 'd,
-  F: Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, A>,
-  G: Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, B>,
+  'c: 'd + 'e,
+  'd: 'e,
+  F: Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, A>,
+  G: Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, B>,
 {
   move |mut i| loop {
     if let Ok((i2, _)) = g(i) {
@@ -69,10 +74,13 @@ where
 }
 
 // A version of many0 that discards the result of the parser, preventing allocating.
-pub fn many0_<'c, 'd, A, F>(f: F) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()>
+pub(crate) fn many0_<'c, 'd, 'e, A, F>(
+  f: F,
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()>
 where
-  'c: 'd,
-  F: Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, A>,
+  'c: 'd + 'e,
+  'd: 'e,
+  F: Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, A>,
 {
   move |i| fold_many0(&f, (), |_, _| ())(i)
 }
@@ -82,7 +90,9 @@ where
 /// This parser accepts the multiline annotation (\) to break the string on several lines.
 ///
 /// Discard any leading newline.
-pub fn str_till_eol<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+pub(crate) fn str_till_eol<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   map(
     recognize(till(alt((value((), tag("\\\n")), value((), anychar))), eol)),
     |i| {
@@ -100,6 +110,8 @@ pub fn str_till_eol<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, Parse
 // This parser succeeds with multispaces and multiline annotation.
 //
 // Taylor Swift loves it.
-pub fn blank_space<'c, 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+pub(crate) fn blank_space<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   recognize(many0_(alt((multispace1, tag("\\\n")))))(i)
 }

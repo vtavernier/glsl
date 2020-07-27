@@ -32,12 +32,12 @@ impl fmt::Display for ParseError {
 }
 
 /// Run a parser `P` on a given `[&str`] input.
-pub(crate) fn run_parser<'d, 'c: 'd, P, T>(
-  source: ParseInput<'c, 'd>,
+pub(crate) fn run_parser<'c, 'd, 'e, P, T>(
+  source: ParseInput<'c, 'd, 'e>,
   parser: P,
 ) -> Result<T, ParseError>
 where
-  P: FnOnce(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, T>,
+  P: FnOnce(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, T>,
 {
   match parser(source) {
     Ok((_, x)) => Ok(x),
@@ -64,8 +64,8 @@ where
   }
 }
 
-pub use super::parsers::ParseContext;
-use super::parsers::ParseInput;
+pub use super::parsers::ParseContextData;
+use super::parsers::{ParseContext, ParseInput};
 
 /// Class of types that can be parsed.
 ///
@@ -75,14 +75,14 @@ use super::parsers::ParseInput;
 pub trait Parse: Sized {
   /// Parse from a string slice.
   fn parse<'b>(source: &'b str) -> Result<Self, ParseError> {
-    let ctx = ParseContext::new();
-    <Self as Parse>::parse_with_context(source, &ctx)
+    let mut data = ParseContextData::new();
+    <Self as Parse>::parse_with_context(source, &mut data)
   }
 
   /// Parse from a string slice and track syntax details using a context
   fn parse_with_context<'d, 'b: 'd>(
     source: &'b str,
-    ctx: &'d ParseContext<'b>,
+    ctx: &'d mut ParseContextData<'b>,
   ) -> Result<Self, ParseError>;
 }
 
@@ -92,8 +92,10 @@ macro_rules! impl_parse {
     impl Parse for $type_name {
       fn parse_with_context<'d, 'b: 'd>(
         source: &'b str,
-        ctx: &'d ParseContext<'b>,
+        ctx: &'d mut ParseContextData<'b>,
       ) -> Result<Self, ParseError> {
+        let ctx = ParseContext::new(ctx);
+
         run_parser(
           ParseInput::new(source.as_ref(), &ctx),
           $crate::parsers::$parser_name,
@@ -106,8 +108,10 @@ macro_rules! impl_parse {
     impl Parse for $type_name {
       fn parse_with_context<'d, 'b: 'd>(
         source: &'b str,
-        ctx: &'d ParseContext<'b>,
+        ctx: &'d mut ParseContextData<'b>,
       ) -> Result<Self, ParseError> {
+        let ctx = ParseContext::new(ctx);
+
         run_parser(ParseInput::new(source.as_ref(), &ctx), move |s| {
           match $crate::parsers::$parser_name(s) {
             Ok((i, r)) => Ok((i, (r.$field))),

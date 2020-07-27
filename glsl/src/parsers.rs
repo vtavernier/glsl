@@ -8,7 +8,8 @@
 mod nom_helpers;
 
 mod parse_input;
-pub use parse_input::*;
+pub use parse_input::ParseContextData;
+pub(crate) use parse_input::*;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until, take_while1};
@@ -24,7 +25,7 @@ use std::num::ParseIntError;
 use nom::{AsBytes, Slice};
 use nom_locate::position;
 
-pub use self::nom_helpers::ParserResult;
+pub(crate) use self::nom_helpers::ParserResult;
 use self::nom_helpers::{blank_space, cnst, eol, many0_, str_till_eol};
 use crate::syntax;
 
@@ -51,9 +52,9 @@ macro_rules! parse_located {
 }
 
 // Parse a keyword. A keyword is just a regular string that must be followed by punctuation.
-fn keyword<'d, 'c: 'd>(
+fn keyword<'e, 'd: 'e, 'c: 'd + 'e>(
   kwd: &'c str,
-) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   terminated(
     tag(kwd),
     not(verify(peek(anychar), |&c| identifier_pred(c))),
@@ -61,7 +62,9 @@ fn keyword<'d, 'c: 'd>(
 }
 
 /// Parse a single comment.
-pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Comment<'c>> {
+pub(crate) fn comment<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Comment<'c>> {
   let (i, res) = parse_located!(i, {
     preceded(
       char('/'),
@@ -74,7 +77,7 @@ pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax
           char('*'),
           map(
             terminated(take_until("*/"), tag("*/")),
-            |i: ParseInput<'c, 'd>| syntax::Comment::Multi(i.fragment()),
+            |i: ParseInput<'c, 'd, 'e>| syntax::Comment::Multi(i.fragment()),
           ),
         ),
       )),
@@ -86,60 +89,66 @@ pub fn comment<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax
 }
 
 /// Parse several comments.
-pub fn comments<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+pub(crate) fn comments<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   recognize(many0_(terminated(comment, blank_space)))(i)
 }
 
 /// In-between token parser (spaces and comments).
 ///
 /// This parser also allows to break a line into two by finishing the line with a backslack ('\').
-fn blank<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+fn blank<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   value((), preceded(blank_space, comments))(i)
 }
 
 #[inline]
-fn identifier_pred<'d, 'c: 'd>(ch: char) -> bool {
+fn identifier_pred<'c, 'd, 'e>(ch: char) -> bool {
   ch.is_alphanumeric() || ch == '_'
 }
 
 #[inline]
-fn verify_identifier<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
+fn verify_identifier<'c, 'd, 'e>(s: &ParseInput<'c, 'd, 'e>) -> bool {
   !char::from(s.as_bytes()[0]).is_digit(10)
 }
 
 /// Parse an identifier (raw version).
-fn identifier_str<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+fn identifier_str<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   verify(take_while1(identifier_pred), verify_identifier)(i)
 }
 
 /// Parse a string that could be used as an identifier.
-pub fn string<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
+pub(crate) fn string<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, String> {
   map(identifier_str, |s| s.to_string())(i)
 }
 
 /// Parse an identifier.
-pub fn identifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::Identifier>> {
+pub(crate) fn identifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Identifier>> {
   parse_located!(i, { map(string, syntax::Identifier)(i) })
 }
 
 /// Parse a type name.
-pub fn type_name<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::TypeName> {
+pub(crate) fn type_name<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeName> {
   map(string, syntax::TypeName)(i)
 }
 
 /// Parse a non-empty list of type names, delimited by comma (,).
-fn nonempty_type_names<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Vec<syntax::TypeName>> {
+fn nonempty_type_names<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Vec<syntax::TypeName>> {
   separated_list(terminated(char(','), blank), terminated(type_name, blank))(i)
 }
 
 /// Parse a type specifier non struct.
-pub fn type_specifier_non_struct<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TypeSpecifierNonArray> {
+pub(crate) fn type_specifier_non_struct<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeSpecifierNonArray> {
   let (i1, t) = identifier_str(i)?;
 
   match t.fragment() {
@@ -273,9 +282,9 @@ pub fn type_specifier_non_struct<'d, 'c: 'd>(
 }
 
 /// Parse a type specifier (non-array version).
-pub fn type_specifier_non_array<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TypeSpecifierNonArray> {
+pub(crate) fn type_specifier_non_array<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeSpecifierNonArray> {
   alt((
     type_specifier_non_struct,
     map(struct_specifier, syntax::TypeSpecifierNonArray::Struct),
@@ -284,9 +293,9 @@ pub fn type_specifier_non_array<'d, 'c: 'd>(
 }
 
 /// Parse a type specifier.
-pub fn type_specifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TypeSpecifier> {
+pub(crate) fn type_specifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeSpecifier> {
   map(
     pair(
       type_specifier_non_array,
@@ -300,59 +309,59 @@ pub fn type_specifier<'d, 'c: 'd>(
 }
 
 /// Parse the void type.
-pub fn void<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+pub(crate) fn void<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   value((), keyword("void"))(i)
 }
 
 /// Parse a digit that precludes a leading 0.
-pub(crate) fn nonzero_digits<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
-  verify(digit1, |s: &ParseInput<'c, 'd>| s.as_bytes()[0] != b'0')(i)
+pub(crate) fn nonzero_digits<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
+  verify(digit1, |s: &ParseInput<'c, 'd, 'e>| s.as_bytes()[0] != b'0')(i)
 }
 
 #[inline]
-fn is_octal<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
+fn is_octal<'c, 'd, 'e>(s: &ParseInput<'c, 'd, 'e>) -> bool {
   s.as_bytes()[0] == b'0' && s.as_bytes().iter().cloned().all(is_oct_digit)
 }
 
 #[inline]
-fn all_hexa<'d, 'c: 'd>(s: &ParseInput<'c, 'd>) -> bool {
+fn all_hexa<'c, 'd, 'e>(s: &ParseInput<'c, 'd, 'e>) -> bool {
   s.as_bytes().iter().cloned().all(is_hex_digit)
 }
 
 #[inline]
-fn alphanumeric_no_u<'d, 'c: 'd>(c: char) -> bool {
+fn alphanumeric_no_u<'c, 'd, 'e>(c: char) -> bool {
   c.is_alphanumeric() && c != 'u' && c != 'U'
 }
 
 /// Parse an hexadecimal literal.
-pub(crate) fn hexadecimal_lit<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
+pub(crate) fn hexadecimal_lit<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Result<u32, ParseIntError>> {
   preceded(
     preceded(char('0'), cut(alt((char('x'), char('X'))))), // 0x | 0X
     cut(map(
       verify(take_while1(alphanumeric_no_u), all_hexa),
-      |i: ParseInput<'c, 'd>| u32::from_str_radix(i.fragment(), 16),
+      |i: ParseInput<'c, 'd, 'e>| u32::from_str_radix(i.fragment(), 16),
     )),
   )(i)
 }
 
 /// Parse an octal literal.
-pub(crate) fn octal_lit<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
+pub(crate) fn octal_lit<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Result<u32, ParseIntError>> {
   map(
     verify(take_while1(alphanumeric_no_u), is_octal),
-    |i: ParseInput<'c, 'd>| u32::from_str_radix(i.fragment(), 8),
+    |i: ParseInput<'c, 'd, 'e>| u32::from_str_radix(i.fragment(), 8),
   )(i)
 }
 
 /// Parse a decimal literal.
-pub(crate) fn decimal_lit<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Result<u32, ParseIntError>> {
+pub(crate) fn decimal_lit<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Result<u32, ParseIntError>> {
   map(nonzero_digits, |i| i.fragment().parse())(i)
 }
 
@@ -375,9 +384,9 @@ pub(crate) fn decimal_lit<'d, 'c: 'd>(
 /// > bit pattern cannot fit in 32 bits. The bit pattern of the
 /// > literal is always used unmodified. So a signed literal whose
 /// > bit pattern includes a set sign bit creates a negative value.
-pub fn integral_lit_try<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Result<i32, ParseIntError>> {
+pub(crate) fn integral_lit_try<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Result<i32, ParseIntError>> {
   let (i, sign) = opt(char('-'))(i)?;
 
   map(alt((octal_lit, hexadecimal_lit, decimal_lit)), move |lit| {
@@ -393,7 +402,7 @@ pub fn integral_lit_try<'d, 'c: 'd>(
   })(i)
 }
 
-pub fn integral_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, i32> {
+pub(crate) fn integral_lit<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, i32> {
   match integral_lit_try(i) {
     Ok((i, v)) => match v {
       Ok(v) => Ok((i, v)),
@@ -410,27 +419,33 @@ pub fn integral_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, i
 }
 
 /// Parse the unsigned suffix.
-pub(crate) fn unsigned_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, char> {
+pub(crate) fn unsigned_suffix<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, char> {
   alt((char('u'), char('U')))(i)
 }
 
 /// Parse a literal unsigned string.
-pub fn unsigned_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, u32> {
+pub(crate) fn unsigned_lit<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, u32> {
   map(terminated(integral_lit, unsigned_suffix), |lit| lit as u32)(i)
 }
 
 /// Parse a floating point suffix.
-fn float_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+fn float_suffix<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   alt((keyword("f"), keyword("F")))(i)
 }
 
 /// Parse a double point suffix.
-fn double_suffix<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+fn double_suffix<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   alt((keyword("lf"), keyword("LF")))(i)
 }
 
 /// Parse the exponent part of a floating point literal.
-fn floating_exponent<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+fn floating_exponent<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   value(
     (),
     preceded(
@@ -441,7 +456,7 @@ fn floating_exponent<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, 
 }
 
 /// Parse the fractional constant part of a floating point literal.
-fn floating_frac<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+fn floating_frac<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   alt((
     value((), preceded(char('.'), digit1)),
     value((), delimited(digit1, char('.'), opt(digit1))),
@@ -449,7 +464,9 @@ fn floating_frac<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> 
 }
 
 /// Parse the « middle » part of a floating value – i.e. fractional and exponential parts.
-fn floating_middle<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+fn floating_middle<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   recognize(alt((
     value((), preceded(floating_frac, opt(floating_exponent))),
     value((), preceded(nonzero_digits, floating_exponent)),
@@ -457,7 +474,7 @@ fn floating_middle<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, Pa
 }
 
 /// Parse a float literal string.
-pub fn float_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f32> {
+pub(crate) fn float_lit<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, f32> {
   let (i, (sign, f)) = tuple((
     opt(char('-')),
     terminated(floating_middle, pair(opt(float_suffix), not(double_suffix))),
@@ -479,7 +496,7 @@ pub fn float_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f32>
 }
 
 /// Parse a double literal string.
-pub fn double_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f64> {
+pub(crate) fn double_lit<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, f64> {
   let (i, (sign, f)) = tuple((
     opt(char('-')),
     terminated(floating_middle, pair(not(float_suffix), opt(double_suffix))),
@@ -500,12 +517,14 @@ pub fn double_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, f64
 }
 
 /// Parse a constant boolean.
-pub fn bool_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, bool> {
+pub(crate) fn bool_lit<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, bool> {
   alt((value(true, keyword("true")), value(false, keyword("false"))))(i)
 }
 
 /// Parse a path literal.
-pub fn path_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Path> {
+pub(crate) fn path_lit<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Path> {
   alt((
     map(path_lit_absolute, syntax::Path::Absolute),
     map(path_lit_relative, syntax::Path::Relative),
@@ -513,23 +532,29 @@ pub fn path_lit<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synta
 }
 
 /// Parse a path literal with angle brackets.
-pub fn path_lit_absolute<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
+pub(crate) fn path_lit_absolute<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, String> {
   map(
     delimited(char('<'), cut(take_until(">")), cut(char('>'))),
-    |s: ParseInput<'c, 'd>| s.to_string(),
+    |s: ParseInput<'c, 'd, 'e>| s.to_string(),
   )(i)
 }
 
 /// Parse a path literal with double quotes.
-pub fn path_lit_relative<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, String> {
+pub(crate) fn path_lit_relative<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, String> {
   map(
     delimited(char('"'), cut(take_until("\"")), cut(char('"'))),
-    |s: ParseInput<'c, 'd>| s.to_string(),
+    |s: ParseInput<'c, 'd, 'e>| s.to_string(),
   )(i)
 }
 
 /// Parse a unary operator.
-pub fn unary_op<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::UnaryOp> {
+pub(crate) fn unary_op<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::UnaryOp> {
   alt((
     value(syntax::UnaryOp::Inc, tag("++")),
     value(syntax::UnaryOp::Dec, tag("--")),
@@ -541,9 +566,9 @@ pub fn unary_op<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synta
 }
 
 /// Parse an identifier with an optional array specifier.
-pub fn arrayed_identifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ArrayedIdentifier> {
+pub(crate) fn arrayed_identifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ArrayedIdentifier> {
   map(
     pair(identifier, opt(preceded(blank, array_specifier))),
     |(i, a)| syntax::ArrayedIdentifier::new(i, a),
@@ -551,9 +576,9 @@ pub fn arrayed_identifier<'d, 'c: 'd>(
 }
 
 /// Parse a struct field declaration.
-pub fn struct_field_specifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::StructFieldSpecifier> {
+pub(crate) fn struct_field_specifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::StructFieldSpecifier> {
   let (i, (qualifier, ty, identifiers, _)) = tuple((
     opt(terminated(type_qualifier, blank)),
     terminated(type_specifier, blank),
@@ -574,9 +599,9 @@ pub fn struct_field_specifier<'d, 'c: 'd>(
 }
 
 /// Parse a struct.
-pub fn struct_specifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::StructSpecifier> {
+pub(crate) fn struct_specifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::StructSpecifier> {
   preceded(
     terminated(keyword("struct"), blank),
     map(
@@ -597,9 +622,9 @@ pub fn struct_specifier<'d, 'c: 'd>(
 }
 
 /// Parse a storage qualifier subroutine rule with a list of type names.
-pub fn storage_qualifier_subroutine_list<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
+pub(crate) fn storage_qualifier_subroutine_list<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::StorageQualifier> {
   map(
     preceded(
       terminated(keyword("subroutine"), blank),
@@ -614,9 +639,9 @@ pub fn storage_qualifier_subroutine_list<'d, 'c: 'd>(
 }
 
 /// Parse a storage qualifier subroutine rule.
-pub fn storage_qualifier_subroutine<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
+pub(crate) fn storage_qualifier_subroutine<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::StorageQualifier> {
   alt((
     storage_qualifier_subroutine_list,
     value(
@@ -627,9 +652,9 @@ pub fn storage_qualifier_subroutine<'d, 'c: 'd>(
 }
 
 /// Parse a storage qualifier.
-pub fn storage_qualifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::StorageQualifier> {
+pub(crate) fn storage_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::StorageQualifier> {
   alt((
     value(syntax::StorageQualifier::Const, keyword("const")),
     value(syntax::StorageQualifier::InOut, keyword("inout")),
@@ -653,9 +678,9 @@ pub fn storage_qualifier<'d, 'c: 'd>(
 }
 
 /// Parse a layout qualifier.
-pub fn layout_qualifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::LayoutQualifier> {
+pub(crate) fn layout_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::LayoutQualifier> {
   preceded(
     terminated(keyword("layout"), blank),
     delimited(
@@ -666,9 +691,9 @@ pub fn layout_qualifier<'d, 'c: 'd>(
   )(i)
 }
 
-fn layout_qualifier_inner<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::LayoutQualifier> {
+fn layout_qualifier_inner<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::LayoutQualifier> {
   map(
     separated_list(
       terminated(char(','), blank),
@@ -680,9 +705,9 @@ fn layout_qualifier_inner<'d, 'c: 'd>(
   )(i)
 }
 
-fn layout_qualifier_spec<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::LayoutQualifierSpec> {
+fn layout_qualifier_spec<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::LayoutQualifierSpec> {
   alt((
     value(syntax::LayoutQualifierSpec::Shared, keyword("shared")),
     map(
@@ -700,9 +725,9 @@ fn layout_qualifier_spec<'d, 'c: 'd>(
 }
 
 /// Parse a precision qualifier.
-pub fn precision_qualifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PrecisionQualifier> {
+pub(crate) fn precision_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PrecisionQualifier> {
   alt((
     value(syntax::PrecisionQualifier::High, keyword("highp")),
     value(syntax::PrecisionQualifier::Medium, keyword("mediump")),
@@ -711,9 +736,9 @@ pub fn precision_qualifier<'d, 'c: 'd>(
 }
 
 /// Parse an interpolation qualifier.
-pub fn interpolation_qualifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::InterpolationQualifier> {
+pub(crate) fn interpolation_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::InterpolationQualifier> {
   alt((
     value(syntax::InterpolationQualifier::Smooth, keyword("smooth")),
     value(syntax::InterpolationQualifier::Flat, keyword("flat")),
@@ -725,19 +750,23 @@ pub fn interpolation_qualifier<'d, 'c: 'd>(
 }
 
 /// Parse an invariant qualifier.
-pub fn invariant_qualifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+pub(crate) fn invariant_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ()> {
   value((), keyword("invariant"))(i)
 }
 
 /// Parse a precise qualifier.
-pub fn precise_qualifier<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, ()> {
+pub(crate) fn precise_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ()> {
   value((), keyword("precise"))(i)
 }
 
 /// Parse a type qualifier.
-pub fn type_qualifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TypeQualifier> {
+pub(crate) fn type_qualifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeQualifier> {
   map(many1(terminated(type_qualifier_spec, blank)), |qlfs| {
     syntax::TypeQualifier {
       qualifiers: syntax::NonEmpty(qlfs),
@@ -746,9 +775,9 @@ pub fn type_qualifier<'d, 'c: 'd>(
 }
 
 /// Parse a type qualifier spec.
-pub fn type_qualifier_spec<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TypeQualifierSpec> {
+pub(crate) fn type_qualifier_spec<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TypeQualifierSpec> {
   alt((
     map(storage_qualifier, syntax::TypeQualifierSpec::Storage),
     map(layout_qualifier, syntax::TypeQualifierSpec::Layout),
@@ -763,9 +792,9 @@ pub fn type_qualifier_spec<'d, 'c: 'd>(
 }
 
 /// Parse a fully specified type.
-pub fn fully_specified_type<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FullySpecifiedType> {
+pub(crate) fn fully_specified_type<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FullySpecifiedType> {
   map(
     pair(opt(type_qualifier), type_specifier),
     |(qualifier, ty)| syntax::FullySpecifiedType { qualifier, ty },
@@ -773,9 +802,9 @@ pub fn fully_specified_type<'d, 'c: 'd>(
 }
 
 /// Parse an array specifier
-pub fn array_specifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ArraySpecifier> {
+pub(crate) fn array_specifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ArraySpecifier> {
   map(
     many1(delimited(blank, array_specifier_dimension, blank)),
     |dimensions| syntax::ArraySpecifier {
@@ -785,9 +814,9 @@ pub fn array_specifier<'d, 'c: 'd>(
 }
 
 /// Parse an array specifier dimension.
-pub fn array_specifier_dimension<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ArraySpecifierDimension> {
+pub(crate) fn array_specifier_dimension<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ArraySpecifierDimension> {
   alt((
     value(
       syntax::ArraySpecifierDimension::Unsized,
@@ -805,7 +834,9 @@ pub fn array_specifier_dimension<'d, 'c: 'd>(
 }
 
 /// Parse a primary expression.
-pub fn primary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn primary_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   alt((
     parens_expr,
     map(float_lit, syntax::Expr::FloatConst),
@@ -818,7 +849,9 @@ pub fn primary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, s
 }
 
 /// Parse a postfix expression.
-pub fn postfix_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn postfix_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, e) = alt((
     function_call_with_identifier,
     function_call_with_expr_ident_or_expr,
@@ -829,10 +862,10 @@ pub fn postfix_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, s
 
 // Parse the postfix part of a primary expression. This function will just parse until it cannot
 // find any more postfix construct.
-fn postfix_part<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
+fn postfix_part<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
   e: syntax::Expr,
-) -> ParserResult<'c, 'd, syntax::Expr> {
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let r = alt((
     map(preceded(blank, array_specifier), |a| {
       syntax::Expr::Bracket(Box::new(e.clone()), a)
@@ -858,7 +891,9 @@ fn postfix_part<'d, 'c: 'd>(
 }
 
 /// Parse a unary expression.
-pub fn unary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn unary_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   alt((
     map(separated_pair(unary_op, blank, unary_expr), |(op, e)| {
       syntax::Expr::Unary(op, Box::new(e))
@@ -868,7 +903,9 @@ pub fn unary_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syn
 }
 
 /// Parse an expression between parens.
-pub fn parens_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn parens_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   delimited(
     terminated(char('('), blank),
     expr,
@@ -877,16 +914,16 @@ pub fn parens_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, sy
 }
 
 /// Parse a dot field selection identifier.
-pub fn dot_field_selection<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::Identifier>> {
+pub(crate) fn dot_field_selection<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Identifier>> {
   preceded(terminated(char('.'), blank), cut(identifier))(i)
 }
 
 /// Parse a declaration.
-pub fn declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::Declaration>> {
+pub(crate) fn declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Declaration>> {
   parse_located!(i, {
     alt((
       map(
@@ -905,9 +942,9 @@ pub fn declaration<'d, 'c: 'd>(
 }
 
 /// Parse a precision declaration.
-pub fn precision_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Declaration> {
+pub(crate) fn precision_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
   delimited(
     terminated(keyword("precision"), blank),
     map(
@@ -922,9 +959,9 @@ pub fn precision_declaration<'d, 'c: 'd>(
 }
 
 /// Parse a block declaration.
-pub fn block_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Declaration> {
+pub(crate) fn block_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
   map(
     tuple((
       terminated(type_qualifier, blank),
@@ -954,9 +991,9 @@ pub fn block_declaration<'d, 'c: 'd>(
 }
 
 /// Parse a global declaration.
-pub fn global_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Declaration> {
+pub(crate) fn global_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
   map(
     pair(
       terminated(type_qualifier, blank),
@@ -967,16 +1004,16 @@ pub fn global_declaration<'d, 'c: 'd>(
 }
 
 /// Parse a function prototype.
-pub fn function_prototype<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
+pub(crate) fn function_prototype<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototype> {
   terminated(function_declarator, terminated(blank, cut(char(')'))))(i)
 }
 
 /// Parse an init declarator list.
-pub fn init_declarator_list<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::InitDeclaratorList> {
+pub(crate) fn init_declarator_list<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::InitDeclaratorList> {
   map(
     pair(
       single_declaration,
@@ -997,9 +1034,9 @@ pub fn init_declarator_list<'d, 'c: 'd>(
 }
 
 /// Parse a single declaration.
-pub fn single_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::SingleDeclaration> {
+pub(crate) fn single_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::SingleDeclaration> {
   let (i, ty) = fully_specified_type(i)?;
   let ty_ = ty.clone();
 
@@ -1030,7 +1067,9 @@ pub fn single_declaration<'d, 'c: 'd>(
 }
 
 /// Parse an initializer.
-pub fn initializer<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Initializer> {
+pub(crate) fn initializer<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Initializer> {
   alt((
     map(assignment_expr, |e| {
       syntax::Initializer::Simple(Box::new(e))
@@ -1050,15 +1089,15 @@ pub fn initializer<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, sy
 }
 
 /// Parse an initializer list.
-pub fn initializer_list<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Vec<syntax::Initializer>> {
+pub(crate) fn initializer_list<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Vec<syntax::Initializer>> {
   separated_list(delimited(blank, char(','), blank), initializer)(i)
 }
 
-fn function_declarator<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
+fn function_declarator<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototype> {
   alt((
     function_header_with_parameters,
     map(function_header, |(ty, name)| syntax::FunctionPrototype {
@@ -1069,18 +1108,18 @@ fn function_declarator<'d, 'c: 'd>(
   ))(i)
 }
 
-fn function_header<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, (syntax::FullySpecifiedType, syntax::Node<syntax::Identifier>)> {
+fn function_header<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, (syntax::FullySpecifiedType, syntax::Node<syntax::Identifier>)> {
   pair(
     terminated(fully_specified_type, blank),
     terminated(identifier, terminated(blank, char('('))),
   )(i)
 }
 
-fn function_header_with_parameters<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionPrototype> {
+fn function_header_with_parameters<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototype> {
   map(
     pair(
       function_header,
@@ -1097,18 +1136,18 @@ fn function_header_with_parameters<'d, 'c: 'd>(
   )(i)
 }
 
-fn function_parameter_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclaration> {
   alt((
     function_parameter_declaration_named,
     function_parameter_declaration_unnamed,
   ))(i)
 }
 
-fn function_parameter_declaration_named<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration_named<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclaration> {
   map(
     pair(
       opt(terminated(type_qualifier, blank)),
@@ -1118,18 +1157,18 @@ fn function_parameter_declaration_named<'d, 'c: 'd>(
   )(i)
 }
 
-fn function_parameter_declaration_unnamed<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclaration> {
+fn function_parameter_declaration_unnamed<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclaration> {
   map(
     pair(opt(terminated(type_qualifier, blank)), type_specifier),
     |(ty_qual, ty_spec)| syntax::FunctionParameterDeclaration::Unnamed(ty_qual, ty_spec),
   )(i)
 }
 
-fn function_parameter_declarator<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunctionParameterDeclarator> {
+fn function_parameter_declarator<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclarator> {
   map(
     tuple((
       terminated(type_specifier, blank),
@@ -1143,18 +1182,18 @@ fn function_parameter_declarator<'d, 'c: 'd>(
   )(i)
 }
 
-fn function_call_with_identifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Expr> {
+fn function_call_with_identifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   map(
     tuple((function_identifier_identifier, function_call_args)),
     |(fi, args)| syntax::Expr::FunCall(fi, args),
   )(i)
 }
 
-fn function_call_with_expr_ident_or_expr<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Expr> {
+fn function_call_with_expr_ident_or_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   map(
     tuple((function_identifier_expr, opt(function_call_args))),
     |(expr, args)| match args {
@@ -1164,9 +1203,9 @@ fn function_call_with_expr_ident_or_expr<'d, 'c: 'd>(
   )(i)
 }
 
-fn function_call_args<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, Vec<syntax::Expr>> {
+fn function_call_args<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, Vec<syntax::Expr>> {
   preceded(
     terminated(terminated(blank, char('(')), blank),
     alt((
@@ -1185,18 +1224,18 @@ fn function_call_args<'d, 'c: 'd>(
   )(i)
 }
 
-fn function_identifier_identifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
+fn function_identifier_identifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunIdentifier> {
   map(
     terminated(identifier, terminated(blank, peek(char('(')))),
     syntax::FunIdentifier::Identifier,
   )(i)
 }
 
-fn function_identifier_expr<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
+fn function_identifier_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunIdentifier> {
   (|i| {
     let (i, e) = primary_expr(i)?;
     postfix_part(i, e).map(|(i, pfe)| (i, syntax::FunIdentifier::Expr(Box::new(pfe))))
@@ -1204,14 +1243,16 @@ fn function_identifier_expr<'d, 'c: 'd>(
 }
 
 /// Parse a function identifier just behind a function list argument.
-pub fn function_identifier<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::FunIdentifier> {
+pub(crate) fn function_identifier<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::FunIdentifier> {
   alt((function_identifier_identifier, function_identifier_expr))(i)
 }
 
 /// Parse the most general expression.
-pub fn expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, first) = assignment_expr(i)?;
   let first_ = first.clone();
 
@@ -1224,7 +1265,9 @@ pub fn expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::E
 }
 
 /// Parse an assignment expression.
-pub fn assignment_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn assignment_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   alt((
     map(
       tuple((
@@ -1239,9 +1282,9 @@ pub fn assignment_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd
 }
 
 /// Parse an assignment operator.
-pub fn assignment_op<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::AssignmentOp> {
+pub(crate) fn assignment_op<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::AssignmentOp> {
   alt((
     value(syntax::AssignmentOp::Equal, char('=')),
     value(syntax::AssignmentOp::Mult, tag("*=")),
@@ -1258,7 +1301,9 @@ pub fn assignment_op<'d, 'c: 'd>(
 }
 
 /// Parse a conditional expression.
-pub fn cond_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn cond_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = logical_or_expr(i)?;
 
   fold_many0(
@@ -1274,7 +1319,9 @@ pub fn cond_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synt
 }
 
 /// Parse a logical OR expression.
-pub fn logical_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn logical_or_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = logical_xor_expr(i)?;
 
   fold_many0(
@@ -1285,7 +1332,9 @@ pub fn logical_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd
 }
 
 /// Parse a logical XOR expression.
-pub fn logical_xor_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn logical_xor_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = logical_and_expr(i)?;
 
   fold_many0(
@@ -1296,7 +1345,9 @@ pub fn logical_xor_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, '
 }
 
 /// Parse a logical AND expression.
-pub fn logical_and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn logical_and_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = inclusive_or_expr(i)?;
 
   fold_many0(
@@ -1307,7 +1358,9 @@ pub fn logical_and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, '
 }
 
 /// Parse a bitwise OR expression.
-pub fn inclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn inclusive_or_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = exclusive_or_expr(i)?;
 
   fold_many0(
@@ -1318,7 +1371,9 @@ pub fn inclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 
 }
 
 /// Parse a bitwise XOR expression.
-pub fn exclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn exclusive_or_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = and_expr(i)?;
 
   fold_many0(
@@ -1329,7 +1384,9 @@ pub fn exclusive_or_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 
 }
 
 /// Parse a bitwise AND expression.
-pub fn and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn and_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = equality_expr(i)?;
 
   fold_many0(
@@ -1340,7 +1397,9 @@ pub fn and_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synta
 }
 
 /// Parse an equality expression.
-pub fn equality_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn equality_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = rel_expr(i)?;
 
   fold_many0(
@@ -1361,7 +1420,9 @@ pub fn equality_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, 
 }
 
 /// Parse a relational expression.
-pub fn rel_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn rel_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = shift_expr(i)?;
 
   fold_many0(
@@ -1384,7 +1445,9 @@ pub fn rel_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synta
 }
 
 /// Parse a shift expression.
-pub fn shift_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn shift_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = additive_expr(i)?;
 
   fold_many0(
@@ -1405,7 +1468,9 @@ pub fn shift_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syn
 }
 
 /// Parse an additive expression.
-pub fn additive_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn additive_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = multiplicative_expr(i)?;
 
   fold_many0(
@@ -1426,9 +1491,9 @@ pub fn additive_expr<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, 
 }
 
 /// Parse a multiplicative expression.
-pub fn multiplicative_expr<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Expr> {
+pub(crate) fn multiplicative_expr<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Expr> {
   let (i, a) = unary_expr(i)?;
 
   fold_many0(
@@ -1450,9 +1515,9 @@ pub fn multiplicative_expr<'d, 'c: 'd>(
 }
 
 /// Parse a simple statement.
-pub fn simple_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::SimpleStatement> {
+pub(crate) fn simple_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::SimpleStatement> {
   alt((
     map(jump_statement, syntax::SimpleStatement::Jump),
     map(iteration_statement, syntax::SimpleStatement::Iteration),
@@ -1467,16 +1532,16 @@ pub fn simple_statement<'d, 'c: 'd>(
 }
 
 /// Parse an expression statement.
-pub fn expr_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ExprStatement> {
+pub(crate) fn expr_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ExprStatement> {
   terminated(terminated(opt(expr), blank), char(';'))(i)
 }
 
 /// Parse a selection statement.
-pub fn selection_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::SelectionStatement> {
+pub(crate) fn selection_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::SelectionStatement> {
   map(
     tuple((
       terminated(keyword("if"), blank),
@@ -1492,9 +1557,9 @@ pub fn selection_statement<'d, 'c: 'd>(
   )(i)
 }
 
-fn selection_rest_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::SelectionRestStatement> {
+fn selection_rest_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::SelectionRestStatement> {
   let (i, st) = statement(i)?;
   let st_ = st.clone();
 
@@ -1508,9 +1573,9 @@ fn selection_rest_statement<'d, 'c: 'd>(
 }
 
 /// Parse a switch statement.
-pub fn switch_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::SwitchStatement> {
+pub(crate) fn switch_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::SwitchStatement> {
   map(
     tuple((
       terminated(keyword("switch"), blank),
@@ -1529,7 +1594,9 @@ pub fn switch_statement<'d, 'c: 'd>(
 }
 
 /// Parse a case label.
-pub fn case_label<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::CaseLabel> {
+pub(crate) fn case_label<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::CaseLabel> {
   alt((
     map(
       delimited(
@@ -1547,9 +1614,9 @@ pub fn case_label<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syn
 }
 
 /// Parse an iteration statement.
-pub fn iteration_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::IterationStatement> {
+pub(crate) fn iteration_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::IterationStatement> {
   alt((
     iteration_statement_while,
     iteration_statement_do_while,
@@ -1558,9 +1625,9 @@ pub fn iteration_statement<'d, 'c: 'd>(
 }
 
 /// Parse a while statement.
-pub fn iteration_statement_while<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::IterationStatement> {
+pub(crate) fn iteration_statement_while<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("while"), blank),
@@ -1574,9 +1641,9 @@ pub fn iteration_statement_while<'d, 'c: 'd>(
 }
 
 /// Parse a while statement.
-pub fn iteration_statement_do_while<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::IterationStatement> {
+pub(crate) fn iteration_statement_do_while<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("do"), blank),
@@ -1592,9 +1659,9 @@ pub fn iteration_statement_do_while<'d, 'c: 'd>(
 }
 
 // Parse a for statement.
-pub fn iteration_statement_for<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::IterationStatement> {
+pub(crate) fn iteration_statement_for<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::IterationStatement> {
   map(
     tuple((
       terminated(keyword("for"), blank),
@@ -1608,9 +1675,9 @@ pub fn iteration_statement_for<'d, 'c: 'd>(
   )(i)
 }
 
-fn iteration_statement_for_init_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ForInitStatement> {
+fn iteration_statement_for_init_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ForInitStatement> {
   alt((
     map(expr_statement, syntax::ForInitStatement::Expression),
     map(declaration, |d| {
@@ -1619,9 +1686,9 @@ fn iteration_statement_for_init_statement<'d, 'c: 'd>(
   ))(i)
 }
 
-fn iteration_statement_for_rest_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::ForRestStatement> {
+fn iteration_statement_for_rest_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::ForRestStatement> {
   map(
     separated_pair(
       opt(terminated(condition, blank)),
@@ -1636,9 +1703,9 @@ fn iteration_statement_for_rest_statement<'d, 'c: 'd>(
 }
 
 /// Parse a jump statement.
-pub fn jump_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::JumpStatement> {
+pub(crate) fn jump_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::JumpStatement> {
   alt((
     jump_statement_continue,
     jump_statement_break,
@@ -1648,9 +1715,9 @@ pub fn jump_statement<'d, 'c: 'd>(
 }
 
 // Parse a continue statement.
-pub fn jump_statement_continue<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::JumpStatement> {
+pub(crate) fn jump_statement_continue<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Continue,
     terminated(keyword("continue"), cut(terminated(blank, char(';')))),
@@ -1658,9 +1725,9 @@ pub fn jump_statement_continue<'d, 'c: 'd>(
 }
 
 // Parse a break statement.
-pub fn jump_statement_break<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::JumpStatement> {
+pub(crate) fn jump_statement_break<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Break,
     terminated(keyword("break"), cut(terminated(blank, char(';')))),
@@ -1668,9 +1735,9 @@ pub fn jump_statement_break<'d, 'c: 'd>(
 }
 
 // Parse a discard statement.
-pub fn jump_statement_discard<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::JumpStatement> {
+pub(crate) fn jump_statement_discard<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::JumpStatement> {
   value(
     syntax::JumpStatement::Discard,
     terminated(keyword("discard"), cut(terminated(blank, char(';')))),
@@ -1678,9 +1745,9 @@ pub fn jump_statement_discard<'d, 'c: 'd>(
 }
 
 // Parse a return statement.
-pub fn jump_statement_return<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::JumpStatement> {
+pub(crate) fn jump_statement_return<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::JumpStatement> {
   map(
     delimited(
       terminated(keyword("return"), blank),
@@ -1692,16 +1759,18 @@ pub fn jump_statement_return<'d, 'c: 'd>(
 }
 
 /// Parse a condition.
-pub fn condition<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Condition> {
+pub(crate) fn condition<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Condition> {
   alt((
     map(expr, |e| syntax::Condition::Expr(Box::new(e))),
     condition_assignment,
   ))(i)
 }
 
-fn condition_assignment<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Condition> {
+fn condition_assignment<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Condition> {
   map(
     tuple((
       terminated(fully_specified_type, blank),
@@ -1714,7 +1783,9 @@ fn condition_assignment<'d, 'c: 'd>(
 }
 
 /// Parse a statement.
-pub fn statement<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::Statement> {
+pub(crate) fn statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Statement> {
   alt((
     map(compound_statement, |c| {
       syntax::Statement::Compound(Box::new(c))
@@ -1724,9 +1795,9 @@ pub fn statement<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, synt
 }
 
 /// Parse a compound statement.
-pub fn compound_statement<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::CompoundStatement> {
+pub(crate) fn compound_statement<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::CompoundStatement> {
   map(
     delimited(
       terminated(char('{'), blank),
@@ -1738,9 +1809,9 @@ pub fn compound_statement<'d, 'c: 'd>(
 }
 
 /// Parse a function definition.
-pub fn function_definition<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::FunctionDefinition>> {
+pub(crate) fn function_definition<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::FunctionDefinition>> {
   parse_located!(i, {
     map(
       pair(terminated(function_prototype, blank), compound_statement),
@@ -1753,9 +1824,9 @@ pub fn function_definition<'d, 'c: 'd>(
 }
 
 /// Parse an external declaration.
-pub fn external_declaration<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::ExternalDeclaration>> {
+pub(crate) fn external_declaration<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::ExternalDeclaration>> {
   parse_located!(i, {
     alt((
       map(preprocessor, |n| {
@@ -1777,9 +1848,9 @@ pub fn external_declaration<'d, 'c: 'd>(
 }
 
 /// Parse a translation unit (entry point).
-pub fn translation_unit<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::TranslationUnit> {
+pub(crate) fn translation_unit<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::TranslationUnit> {
   map(
     many1(delimited(blank, external_declaration, blank)),
     |eds| syntax::TranslationUnit(syntax::NonEmpty(eds)),
@@ -1787,9 +1858,9 @@ pub fn translation_unit<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor directive.
-pub fn preprocessor<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Node<syntax::Preprocessor>> {
+pub(crate) fn preprocessor<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Preprocessor>> {
   parse_located!(i, {
     preceded(
       terminated(char('#'), pp_space0),
@@ -1814,14 +1885,16 @@ pub fn preprocessor<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor version number.
-pub(crate) fn pp_version_number<'d, 'c: 'd>(i: ParseInput<'c, 'd>) -> ParserResult<'c, 'd, u16> {
-  map(digit1, |x: ParseInput<'c, 'd>| x.parse_to().unwrap())(i)
+pub(crate) fn pp_version_number<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, u16> {
+  map(digit1, |x: ParseInput<'c, 'd, 'e>| x.parse_to().unwrap())(i)
 }
 
 /// Parse a preprocessor version profile.
-pub(crate) fn pp_version_profile<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorVersionProfile> {
+pub(crate) fn pp_version_profile<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorVersionProfile> {
   alt((
     value(syntax::PreprocessorVersionProfile::Core, keyword("core")),
     value(
@@ -1835,16 +1908,16 @@ pub(crate) fn pp_version_profile<'d, 'c: 'd>(
 /// The space parser in preprocessor directives.
 ///
 /// This parser is needed to authorize breaking a line with the multiline annotation (\).
-pub(crate) fn pp_space0<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, ParseInput<'c, 'd>> {
+pub(crate) fn pp_space0<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   recognize(many0_(alt((space1, tag("\\\n")))))(i)
 }
 
 /// Parse a preprocessor define.
-pub(crate) fn pp_define<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
+pub(crate) fn pp_define<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorDefine> {
   let (i, ident) = map(
     tuple((terminated(keyword("define"), pp_space0), cut(identifier))),
     |(_, ident)| ident,
@@ -1857,9 +1930,9 @@ pub(crate) fn pp_define<'d, 'c: 'd>(
 }
 
 // Parse an object-like #define content.
-pub(crate) fn pp_define_object_like<'d, 'c: 'd>(
+pub(crate) fn pp_define_object_like<'e, 'd: 'e, 'c: 'd + 'e>(
   ident: syntax::Node<syntax::Identifier>,
-) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorDefine> {
   move |i| {
     map(preceded(pp_space0, cut(str_till_eol)), |value| {
       syntax::PreprocessorDefine::ObjectLike {
@@ -1871,9 +1944,9 @@ pub(crate) fn pp_define_object_like<'d, 'c: 'd>(
 }
 
 // Parse a function-like #define content.
-pub(crate) fn pp_define_function_like<'d, 'c: 'd>(
+pub(crate) fn pp_define_function_like<'e, 'd: 'e, 'c: 'd + 'e>(
   ident: syntax::Node<syntax::Identifier>,
-) -> impl Fn(ParseInput<'c, 'd>) -> ParserResult<'c, 'd, syntax::PreprocessorDefine> {
+) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorDefine> {
   move |i| {
     map(
       tuple((
@@ -1895,9 +1968,9 @@ pub(crate) fn pp_define_function_like<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor else.
-pub(crate) fn pp_else<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Preprocessor> {
+pub(crate) fn pp_else<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Preprocessor> {
   value(
     syntax::Preprocessor::Else,
     tuple((terminated(keyword("else"), pp_space0), cut(eol))),
@@ -1905,9 +1978,9 @@ pub(crate) fn pp_else<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor elseif.
-pub(crate) fn pp_elseif<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorElseIf> {
+pub(crate) fn pp_elseif<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorElseIf> {
   map(
     tuple((
       terminated(keyword("elseif"), pp_space0),
@@ -1918,9 +1991,9 @@ pub(crate) fn pp_elseif<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor endif.
-pub(crate) fn pp_endif<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::Preprocessor> {
+pub(crate) fn pp_endif<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::Preprocessor> {
   map(
     tuple((terminated(keyword("endif"), space0), cut(eol))),
     |(_, _)| syntax::Preprocessor::EndIf,
@@ -1928,9 +2001,9 @@ pub(crate) fn pp_endif<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor error.
-pub(crate) fn pp_error<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorError> {
+pub(crate) fn pp_error<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorError> {
   map(
     tuple((terminated(keyword("error"), pp_space0), cut(str_till_eol))),
     |(_, message)| syntax::PreprocessorError {
@@ -1940,9 +2013,9 @@ pub(crate) fn pp_error<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor if.
-pub(crate) fn pp_if<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorIf> {
+pub(crate) fn pp_if<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorIf> {
   map(
     tuple((
       terminated(keyword("if"), pp_space0),
@@ -1953,9 +2026,9 @@ pub(crate) fn pp_if<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor ifdef.
-pub(crate) fn pp_ifdef<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorIfDef> {
+pub(crate) fn pp_ifdef<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorIfDef> {
   map(
     tuple((
       terminated(keyword("ifdef"), pp_space0),
@@ -1967,9 +2040,9 @@ pub(crate) fn pp_ifdef<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor ifndef.
-pub(crate) fn pp_ifndef<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorIfNDef> {
+pub(crate) fn pp_ifndef<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorIfNDef> {
   map(
     tuple((
       terminated(keyword("ifndef"), pp_space0),
@@ -1981,9 +2054,9 @@ pub(crate) fn pp_ifndef<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor include.
-pub(crate) fn pp_include<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorInclude> {
+pub(crate) fn pp_include<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorInclude> {
   map(
     tuple((
       terminated(keyword("include"), pp_space0),
@@ -1995,9 +2068,9 @@ pub(crate) fn pp_include<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor line.
-pub(crate) fn pp_line<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorLine> {
+pub(crate) fn pp_line<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorLine> {
   map(
     tuple((
       terminated(keyword("line"), pp_space0),
@@ -2013,9 +2086,9 @@ pub(crate) fn pp_line<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor pragma.
-pub(crate) fn pp_pragma<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorPragma> {
+pub(crate) fn pp_pragma<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorPragma> {
   map(
     tuple((terminated(keyword("pragma"), pp_space0), cut(str_till_eol))),
     |(_, command)| syntax::PreprocessorPragma {
@@ -2025,9 +2098,9 @@ pub(crate) fn pp_pragma<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor undef.
-pub(crate) fn pp_undef<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorUndef> {
+pub(crate) fn pp_undef<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorUndef> {
   map(
     tuple((
       terminated(keyword("undef"), pp_space0),
@@ -2039,9 +2112,9 @@ pub(crate) fn pp_undef<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor version.
-pub(crate) fn pp_version<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorVersion> {
+pub(crate) fn pp_version<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorVersion> {
   map(
     tuple((
       terminated(keyword("version"), pp_space0),
@@ -2054,9 +2127,9 @@ pub(crate) fn pp_version<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor extension name.
-pub(crate) fn pp_extension_name<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorExtensionName> {
+pub(crate) fn pp_extension_name<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorExtensionName> {
   alt((
     value(syntax::PreprocessorExtensionName::All, keyword("all")),
     map(string, syntax::PreprocessorExtensionName::Specific),
@@ -2064,9 +2137,9 @@ pub(crate) fn pp_extension_name<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor extension behavior.
-pub(crate) fn pp_extension_behavior<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorExtensionBehavior> {
+pub(crate) fn pp_extension_behavior<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorExtensionBehavior> {
   alt((
     value(
       syntax::PreprocessorExtensionBehavior::Require,
@@ -2085,9 +2158,9 @@ pub(crate) fn pp_extension_behavior<'d, 'c: 'd>(
 }
 
 /// Parse a preprocessor extension.
-pub(crate) fn pp_extension<'d, 'c: 'd>(
-  i: ParseInput<'c, 'd>,
-) -> ParserResult<'c, 'd, syntax::PreprocessorExtension> {
+pub(crate) fn pp_extension<'c, 'd, 'e>(
+  i: ParseInput<'c, 'd, 'e>,
+) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorExtension> {
   map(
     tuple((
       terminated(keyword("extension"), pp_space0),
