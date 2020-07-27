@@ -38,11 +38,11 @@ pub struct ParseContext<'s> {
   data: RefCell<ParseContextData<'s>>,
 }
 
-pub struct ContextData<'s, 'b> {
+pub struct ContextData<'b, 's> {
   guard: std::cell::Ref<'b, ParseContextData<'s>>,
 }
 
-impl<'s> std::ops::Deref for ContextData<'s, '_> {
+impl<'s> std::ops::Deref for ContextData<'_, 's> {
   type Target = ParseContextData<'s>;
 
   fn deref(&self) -> &Self::Target {
