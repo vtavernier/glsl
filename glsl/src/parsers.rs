@@ -42,7 +42,7 @@ macro_rules! parse_located {
 
     Ok((
       $i,
-      s.context.commit_span(
+      s.context().commit_span(
         res,
         s.slice(0..(end.location_offset() - start.location_offset())),
       ),
@@ -83,7 +83,7 @@ pub(crate) fn comment<'c, 'd, 'e>(
     )(i)
   })?;
 
-  i.context.add_comment(res);
+  i.context().add_comment(res);
   Ok((i, res.into_inner()))
 }
 

@@ -94,12 +94,10 @@ macro_rules! impl_parse {
         source: &'b str,
         ctx: &'d mut ParseContextData<'b>,
       ) -> Result<Self, ParseError> {
-        let ctx = ParseContext::new(ctx);
-
-        run_parser(
-          ParseInput::new(source.as_ref(), &ctx),
-          $crate::parsers::$parser_name,
-        )
+        let mut ctx = ParseContext::new(ctx);
+        ctx.parse(source.as_ref(), |input| {
+          run_parser(input, $crate::parsers::$parser_name)
+        })
       }
     }
   };
@@ -110,13 +108,12 @@ macro_rules! impl_parse {
         source: &'b str,
         ctx: &'d mut ParseContextData<'b>,
       ) -> Result<Self, ParseError> {
-        let ctx = ParseContext::new(ctx);
-
-        run_parser(ParseInput::new(source.as_ref(), &ctx), move |s| {
-          match $crate::parsers::$parser_name(s) {
+        let mut ctx = ParseContext::new(ctx);
+        ctx.parse(source.as_ref(), |input| {
+          run_parser(input, move |s| match $crate::parsers::$parser_name(s) {
             Ok((i, r)) => Ok((i, (r.$field))),
             Err(e) => Err(e),
-          }
+          })
         })
       }
     }

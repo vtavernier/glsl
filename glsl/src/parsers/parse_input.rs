@@ -83,6 +83,33 @@ impl<'s> ParseContextData<'s> {
     None
   }
 
+  fn rollback(&mut self) {
+    let remove_source_id = self.current_source - 1;
+
+    // Clear source_ends
+    self.source_ends.pop();
+
+    // Decrement current_source
+    self.current_source -= 1;
+
+    let mut delete_spans = std::collections::HashSet::new();
+
+    // Remove spans referring to this source
+    if let Some(spans) = self.spans.as_mut() {
+      // There is no retain method on a BiBTreeMap
+      let start = syntax::NodeSpan::new_start(remove_source_id);
+      delete_spans.extend(spans.left_range(&start..).map(|(_, r)| *r));
+      for span in &delete_spans {
+        spans.remove_by_right(&span);
+      }
+    }
+
+    // Remove comments referring to this source
+    if let Some(comments) = self.comments.as_mut() {
+      comments.retain(|i, _| !delete_spans.contains(&unsafe { NonZeroUsize::new_unchecked(*i) }));
+    }
+  }
+
   fn next_source(&mut self) -> usize {
     let res = self.current_source;
     self.current_source += 1;
@@ -144,12 +171,28 @@ impl<'s> std::ops::Deref for ContextData<'_, 's, '_> {
 
 impl<'s, 'd> ParseContext<'s, 'd> {
   pub fn new(data: &'d mut ParseContextData<'s>) -> Self {
-    let source_id = data.next_source();
-
     Self {
       data: RefCell::new(data),
-      source_id,
+      source_id: 0,
     }
+  }
+
+  pub fn parse<'e, T, E>(
+    &'e mut self,
+    input: &'s str,
+    f: impl FnOnce(ParseInput<'s, 'd, 'e>) -> Result<T, E>,
+  ) -> Result<T, E> {
+    self.source_id = self.data.borrow_mut().next_source();
+
+    let res = f(ParseInput::new(input, self));
+
+    // In case parsing failed, we need to discard the results
+    if res.is_err() {
+      self.data.borrow_mut().rollback();
+    }
+
+    // Return parsing result
+    res
   }
 
   pub fn add_comment(&self, cmt: syntax::Node<syntax::Comment<'s>>) {
@@ -173,16 +216,20 @@ impl<'s, 'd> ParseContext<'s, 'd> {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ParseInput<'c, 'd, 'e> {
-  pub input: LocatedSpan<&'c str>,
-  pub context: &'e ParseContext<'c, 'd>,
+  input: LocatedSpan<&'c str>,
+  context: &'e ParseContext<'c, 'd>,
 }
 
 impl<'c, 'd, 'e> ParseInput<'c, 'd, 'e> {
-  pub fn new(input: &'c str, context: &'e ParseContext<'c, 'd>) -> Self {
+  fn new(input: &'c str, context: &'e ParseContext<'c, 'd>) -> Self {
     Self {
       input: LocatedSpan::new(input),
       context,
     }
+  }
+
+  pub fn context(&self) -> &'e ParseContext<'c, 'd> {
+    self.context
   }
 
   pub fn fragment(&self) -> &'c str {

@@ -8,18 +8,20 @@ fn assert_eq_parser<'c, R: PartialEq + std::fmt::Debug>(
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
   data: &mut ParseContextData<'c>,
 ) {
-  let ctx = ParseContext::new(data);
+  let mut ctx = ParseContext::new(data);
 
   assert_eq!(
-    parser(ParseInput::new(input, &ctx))
-      .map(|(a, b)| (a.fragment(), b))
-      .map_err(|e| e.map(|e| nom::error::VerboseError {
-        errors: e
-          .errors
-          .into_iter()
-          .map(|(i, k)| (i.fragment(), k))
-          .collect()
-      })),
+    ctx.parse(input, move |input| {
+      parser(input).map(|(a, b)| (a.fragment(), b)).map_err(|e| {
+        e.map(|e| nom::error::VerboseError {
+          errors: e
+            .errors
+            .into_iter()
+            .map(|(i, k)| (i.fragment(), k))
+            .collect(),
+        })
+      })
+    }),
     output
   );
 }
@@ -34,25 +36,27 @@ fn assert_eq_parser_span<'c, R: NodeContents>(
   let mut span_id = None;
 
   let check_span = {
-    let ctx = ParseContext::new(data);
+    let mut ctx = ParseContext::new(data);
 
-    let res = parser(ParseInput::new(input, &ctx))
-      .map(|(a, b)| {
-        span_id = Some(b.span_id);
-        (a.fragment(), b.contents)
-      })
-      .map_err(|e| {
-        e.map(|e| nom::error::VerboseError {
-          errors: e
-            .errors
-            .into_iter()
-            .map(|(i, k)| (i.fragment(), k))
-            .collect(),
+    let res = ctx.parse(input, |input| {
+      parser(input)
+        .map(|(a, b)| {
+          span_id = Some(b.span_id);
+          (a.fragment(), b.contents)
         })
-      });
+        .map_err(|e| {
+          e.map(|e| nom::error::VerboseError {
+            errors: e
+              .errors
+              .into_iter()
+              .map(|(i, k)| (i.fragment(), k))
+              .collect(),
+          })
+        })
+    });
 
     assert_eq!(res, output);
-    true
+    res.is_ok()
   };
 
   if let Some(span_id) = span_id {
@@ -68,18 +72,22 @@ fn assert_eq_parser_1<'c, R: NodeContents>(
   output: nom::IResult<&str, R, nom::error::VerboseError<&str>>,
   data: &mut ParseContextData<'c>,
 ) {
-  let ctx = ParseContext::new(data);
+  let mut ctx = ParseContext::new(data);
 
   assert_eq!(
-    parser(ParseInput::new(input, &ctx))
-      .map(|(a, b)| (a.fragment(), b.contents))
-      .map_err(|e| e.map(|e| nom::error::VerboseError {
-        errors: e
-          .errors
-          .into_iter()
-          .map(|(i, k)| (i.fragment(), k))
-          .collect()
-      })),
+    ctx.parse(input, |input| {
+      parser(input)
+        .map(|(a, b)| (a.fragment(), b.contents))
+        .map_err(|e| {
+          e.map(|e| nom::error::VerboseError {
+            errors: e
+              .errors
+              .into_iter()
+              .map(|(i, k)| (i.fragment(), k))
+              .collect(),
+          })
+        })
+    }),
     output
   );
 }
@@ -92,18 +100,22 @@ fn assert_eq_parser_str<'c>(
   output: nom::IResult<&str, &str, nom::error::VerboseError<&str>>,
   data: &mut ParseContextData<'c>,
 ) {
-  let ctx = ParseContext::new(data);
+  let mut ctx = ParseContext::new(data);
 
   assert_eq!(
-    parser(ParseInput::new(input, &ctx))
-      .map(|(a, b)| (a.fragment(), b.fragment()))
-      .map_err(|e| e.map(|e| nom::error::VerboseError {
-        errors: e
-          .errors
-          .into_iter()
-          .map(|(i, k)| (i.fragment(), k))
-          .collect()
-      })),
+    ctx.parse(input, |input| {
+      parser(input)
+        .map(|(a, b)| (a.fragment(), b.fragment()))
+        .map_err(|e| {
+          e.map(|e| nom::error::VerboseError {
+            errors: e
+              .errors
+              .into_iter()
+              .map(|(i, k)| (i.fragment(), k))
+              .collect(),
+          })
+        })
+    }),
     output
   );
 }
@@ -282,11 +294,11 @@ fn parse_unsigned_lit() {
     &mut data,
   );
   assert_eq_parser(unsigned_lit, "-1u", Ok(("", 0xffffffff as u32)), &mut data);
-  assert!(unsigned_lit(ParseInput::new(
-    "0xfffffffffU",
-    &ParseContext::new(&mut data)
-  ))
-  .is_err());
+
+  let mut ctx = ParseContext::new(&mut data);
+  assert!(ctx
+    .parse("0xfffffffffU", |input| unsigned_lit(input))
+    .is_err());
 }
 
 #[test]
@@ -4169,13 +4181,12 @@ fn parse_arrayed_identifier() {
 #[test]
 fn parse_nested_parens() {
   let mut data = ParseContextData::new();
+  let mut ctx = ParseContext::new(&mut data);
 
   let start = std::time::Instant::now();
-  parens_expr(ParseInput::new(
-    "((((((((1.0f))))))))",
-    &ParseContext::new(&mut data),
-  ))
-  .unwrap();
+  ctx
+    .parse("((((((((1.0f))))))))", |input| parens_expr(input))
+    .unwrap();
   let elapsed = start.elapsed();
   assert!(elapsed.as_millis() < 100, "{} ms", elapsed.as_millis());
 }
