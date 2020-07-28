@@ -72,6 +72,15 @@ impl<'s> ParseContextData<'s> {
     }
   }
 
+  pub fn set_source(&mut self, source: usize) {
+    assert!(
+      self.current_source == 0,
+      "set_source can only be called once per ParseContextData"
+    );
+
+    self.current_source = source + 1;
+  }
+
   pub fn source_end(&self, source_id: usize) -> Option<syntax::NodeSpan> {
     if source_id < self.current_source {
       return Some(syntax::NodeSpan::new_end(
