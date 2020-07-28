@@ -40,6 +40,9 @@ pub struct NodeSpan {
   /// parser. It starts at line 1.
   pub line: u32,
 
+  /// The column starting from the left (assuming ASCII text)
+  pub column: u32,
+
   /// The length of the span represented by this structure
   pub length: usize,
 }
@@ -53,6 +56,7 @@ impl NodeSpan {
       source_id,
       offset: 0,
       line: 1,
+      column: 0,
       length: 0,
     }
   }
@@ -65,6 +69,7 @@ impl NodeSpan {
       source_id,
       offset: length,
       line: 1,
+      column: 0,
       length: 0,
     }
   }
@@ -77,6 +82,7 @@ impl NodeSpan {
     Self {
       source_id: self.source_id,
       line: self.line,
+      column: self.column,
       offset: self.offset + self.length,
       length: 0,
     }
@@ -89,6 +95,7 @@ impl std::convert::From<(usize, ParseInput<'_, '_, '_>)> for NodeSpan {
       source_id,
       offset: span.location_offset(),
       line: span.location_line(),
+      column: span.get_column() as u32,
       length: span.fragment().len(),
     }
   }

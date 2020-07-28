@@ -1420,10 +1420,11 @@ fn tokenize_span(s: &syntax::NodeSpan) -> TokenStream {
     source_id,
     offset,
     line,
+    column,
     length,
   } = s;
 
-  quote! { glsl::syntax::NodeSpan { source_id: #source_id, offset: #offset, line: #line, length: #length } }
+  quote! { glsl::syntax::NodeSpan { source_id: #source_id, offset: #offset, line: #line, column: #column, length: #length } }
 }
 
 fn tokenize_external_declaration(ed: &syntax::Node<syntax::ExternalDeclaration>) -> TokenStream {
