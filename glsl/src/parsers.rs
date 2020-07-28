@@ -22,6 +22,7 @@ use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple
 use nom::{Err as NomErr, ParseTo};
 use std::num::ParseIntError;
 
+use std::borrow::Cow;
 use nom::{AsBytes, Slice};
 use nom_locate::position;
 
@@ -70,20 +71,20 @@ pub(crate) fn comment<'c, 'd, 'e>(
       alt((
         preceded(
           char('/'),
-          cut(map(str_till_eol, |i| syntax::Comment::Single(i.fragment()))),
+          cut(map(str_till_eol, |i| syntax::Comment::Single(Cow::Borrowed(i.fragment())))),
         ),
         preceded(
           char('*'),
           map(
             terminated(take_until("*/"), tag("*/")),
-            |i: ParseInput<'c, 'd, 'e>| syntax::Comment::Multi(i.fragment()),
+            |i: ParseInput<'c, 'd, 'e>| syntax::Comment::Multi(Cow::Borrowed(i.fragment())),
           ),
         ),
       )),
     )(i)
   })?;
 
-  i.context().add_comment(res);
+  i.context().add_comment(res.clone());
   Ok((i, res.into_inner()))
 }
 

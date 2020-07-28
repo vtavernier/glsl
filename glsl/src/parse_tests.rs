@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::parsers::*;
 use crate::syntax;
 use crate::syntax::NodeContents;
@@ -126,7 +128,7 @@ fn parse_uniline_comment() {
   assert_eq_parser(
     comment,
     "// lol",
-    Ok(("", syntax::Comment::Single(" lol"))),
+    Ok(("", syntax::Comment::Single(Cow::Borrowed(" lol")))),
     &mut data,
   );
   let cmt = data.comments().unwrap();
@@ -140,7 +142,7 @@ fn parse_uniline_comment() {
   assert_eq_parser(
     comment,
     "// lol\nfoo",
-    Ok(("foo", syntax::Comment::Single(" lol"))),
+    Ok(("foo", syntax::Comment::Single(Cow::Borrowed(" lol")))),
     &mut data,
   );
   let cmt = data.comments().unwrap();
@@ -151,7 +153,7 @@ fn parse_uniline_comment() {
   assert_eq_parser(
     comment,
     "// lol\\\nfoo",
-    Ok(("", syntax::Comment::Single(" lol\\\nfoo"))),
+    Ok(("", syntax::Comment::Single(Cow::Borrowed(" lol\\\nfoo")))),
     &mut data,
   );
   let cmt = data.comments().unwrap();
@@ -162,7 +164,7 @@ fn parse_uniline_comment() {
   assert_eq_parser(
     comment,
     "// lol   \\\n   foo\n",
-    Ok(("", syntax::Comment::Single(" lol   \\\n   foo"))),
+    Ok(("", syntax::Comment::Single(Cow::Borrowed(" lol   \\\n   foo")))),
     &mut data,
   );
   let cmt = data.comments().unwrap();
@@ -177,7 +179,7 @@ fn parse_multiline_comment() {
   assert_eq_parser(
     comment,
     "/* lol\nfoo\n*/bar",
-    Ok(("bar", syntax::Comment::Multi(" lol\nfoo\n"))),
+    Ok(("bar", syntax::Comment::Multi(Cow::Borrowed(" lol\nfoo\n")))),
     &mut data,
   );
 }

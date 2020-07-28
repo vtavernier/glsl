@@ -18,6 +18,7 @@
 //! [`Expr`]: syntax::Expr
 //! [`FunctionDefinition`]: syntax::FunctionDefinition
 
+use std::borrow::Cow;
 use std::fmt;
 use std::iter::{once, FromIterator};
 use std::num::NonZeroUsize;
@@ -1468,19 +1469,26 @@ pub enum PreprocessorExtensionBehavior {
 }
 
 /// A borrowed comment
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Comment<'s> {
   /// Single-line comment
-  Single(&'s str),
+  Single(Cow<'s, str>),
   /// Multi-line comment
-  Multi(&'s str),
+  Multi(Cow<'s, str>),
 }
 
-impl<'s> Comment<'s> {
+impl Comment<'_> {
   pub fn text(&self) -> &str {
     match self {
       Self::Single(s) => s,
       Self::Multi(s) => s,
+    }
+  }
+
+  pub fn to_owned(&self) -> Comment<'static> {
+    match self {
+      Self::Single(s) => Comment::Single(Cow::Owned(s.clone().into_owned())),
+      Self::Multi(s) => Comment::Multi(Cow::Owned(s.clone().into_owned())),
     }
   }
 }
