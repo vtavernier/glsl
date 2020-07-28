@@ -339,6 +339,7 @@ impl fmt::Display for Identifier {
 }
 
 impl NodeContents for Identifier {}
+impl NodeContents for &Identifier {}
 
 impl<'a> From<&'a str> for Node<Identifier> {
   fn from(s: &str) -> Self {
@@ -741,6 +742,7 @@ pub enum Declaration {
 }
 
 impl NodeContents for Declaration {}
+impl NodeContents for &Declaration {}
 
 /// A general purpose block, containing fields and possibly a list of declared identifiers. Semantic
 /// is given with the storage qualifier.
@@ -1045,6 +1047,7 @@ pub enum ExternalDeclaration {
 }
 
 impl NodeContents for ExternalDeclaration {}
+impl NodeContents for &ExternalDeclaration {}
 
 impl ExternalDeclaration {
   /// Create a new function.
@@ -1114,6 +1117,7 @@ pub struct FunctionDefinition {
 }
 
 impl NodeContents for FunctionDefinition {}
+impl NodeContents for &FunctionDefinition {}
 
 /// Compound statement (with no new scope).
 #[derive(Clone, Debug, PartialEq)]
@@ -1354,6 +1358,7 @@ pub enum Preprocessor {
 }
 
 impl NodeContents for Preprocessor {}
+impl NodeContents for &Preprocessor {}
 
 /// A #define preprocessor directive.
 ///
@@ -1494,6 +1499,7 @@ impl Comment<'_> {
 }
 
 impl NodeContents for Comment<'_> {}
+impl NodeContents for &Comment<'_> {}
 
 #[cfg(test)]
 mod tests {
