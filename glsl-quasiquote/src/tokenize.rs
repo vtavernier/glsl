@@ -128,9 +128,9 @@ impl_tokenize!(
 );
 
 fn tokenize_identifier(i: &syntax::Node<syntax::Identifier>) -> TokenStream {
+  let span = tokenize_span(&i.span);
   let i = i.quote();
-  // TODO: Store span id in generated code?
-  quote! { glsl::syntax::Node::new(#i, None) }
+  quote! { glsl::syntax::Node::new(#i, #span) }
 }
 
 fn tokenize_path(p: &syntax::Path) -> TokenStream {
@@ -1415,38 +1415,45 @@ fn tokenize_preprocessor_extension_behavior(
   }
 }
 
-fn tokenize_span(s: &syntax::NodeSpan) -> TokenStream {
-  let syntax::NodeSpan {
-    source_id,
-    offset,
-    line,
-    column,
-    length,
-  } = s;
+fn tokenize_span(s: &Option<syntax::NodeSpan>) -> TokenStream {
+  if let Some(s) = s {
+    let syntax::NodeSpan {
+      source_id,
+      offset,
+      line,
+      column,
+      length,
+    } = s;
 
-  quote! { glsl::syntax::NodeSpan { source_id: #source_id, offset: #offset, line: #line, column: #column, length: #length } }
+    quote! { Some(glsl::syntax::NodeSpan { source_id: #source_id, offset: #offset, line: #line, column: #column, length: #length }) }
+  } else {
+    quote! { None }
+  }
 }
 
 fn tokenize_external_declaration(ed: &syntax::Node<syntax::ExternalDeclaration>) -> TokenStream {
   let contents = match ed.contents {
     syntax::ExternalDeclaration::Preprocessor(ref pp) => {
+      let span = tokenize_span(&pp.span);
       let pp = tokenize_preprocessor(pp);
-      quote! { glsl::syntax::ExternalDeclaration::Preprocessor(#pp) }
+      quote! { glsl::syntax::ExternalDeclaration::Preprocessor(glsl::syntax::Node::new(#pp, #span)) }
     }
 
     syntax::ExternalDeclaration::FunctionDefinition(ref fd) => {
+      let span = tokenize_span(&fd.span);
       let fd = tokenize_function_definition(fd);
-      quote! { glsl::syntax::ExternalDeclaration::FunctionDefinition(#fd) }
+      quote! { glsl::syntax::ExternalDeclaration::FunctionDefinition(glsl::syntax::Node::new(#fd, #span)) }
     }
 
     syntax::ExternalDeclaration::Declaration(ref d) => {
+      let span = tokenize_span(&d.span);
       let d = tokenize_declaration(d);
-      quote! { glsl::syntax::ExternalDeclaration::Declaration(#d) }
+      quote! { glsl::syntax::ExternalDeclaration::Declaration(glsl::syntax::Node::new(#d, #span)) }
     }
   };
 
-  // TODO: Tokenize node spans from context?
-  quote! { glsl::syntax::Node::new(#contents, None) }
+  let span = tokenize_span(&ed.span);
+  quote! { glsl::syntax::Node::new(#contents, #span) }
 }
 
 fn tokenize_translation_unit(tu: &syntax::TranslationUnit) -> TokenStream {

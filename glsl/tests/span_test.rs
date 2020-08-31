@@ -39,23 +39,18 @@ float someExtraFunction() {
   let decl_cb = |start_span: &mut glsl::syntax::NodeSpan, decl: Node<ExternalDeclaration>| {
     // Look for the last comment before each declaration
     if let ExternalDeclaration::FunctionDefinition(fndef) = &decl.contents {
-      // Get the span for this declaration
-      let span = data.get_span(decl.span_id).unwrap();
+      let span = decl.span.as_ref().unwrap();
 
-      // Find all spans between the start span and the declaration span
+      // Find all comments in spans between the start span and the declaration span
       let all_spans = data
-        .spans()
+        .comments()
         .unwrap()
-        .left_range(&start_span.to_end_location()..span);
+        .range(&start_span.to_end_location()..span);
 
       // Get comments by their span id
-      for (comment_span, id) in all_spans {
+      for (comment_span, cmt) in all_spans {
         assert!(comment_span < span);
-        println!(
-          "comment for {}: {}",
-          fndef.prototype.name.0,
-          data.comments().unwrap()[&id.get()].text()
-        );
+        println!("comment for {}: {}", fndef.prototype.name.0, cmt.text(),);
       }
 
       *start_span = *span;

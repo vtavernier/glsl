@@ -17,7 +17,7 @@ edition = "2018"
 spirv = ["shaderc"]
 
 [dependencies]
+glsl-impl = "5"
 nom = { version = "5", default-features = false, features = ["std"] }
 shaderc = { version = "0.6", optional = true }
 nom_locate = "2"
-bimap = "0.5"

@@ -21,157 +21,12 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::iter::{once, FromIterator};
-use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 
-use crate::parsers::ParseInput;
+use glsl_impl::NodeContents;
 
-/// Span information for a node, constructed from a nom_locate::LocatedSpan
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord)]
-pub struct NodeSpan {
-  /// The index of this span into the list of parsed units. This is used to
-  /// identify which source string this span refers to when combining multiple ASTs
-  pub source_id: usize,
-
-  /// The offset represents the position of the fragment relatively to
-  /// the input of the parser. It starts at offset 0.
-  pub offset: usize,
-
-  /// The line number of the fragment relatively to the input of the
-  /// parser. It starts at line 1.
-  pub line: u32,
-
-  /// The column starting from the left (assuming ASCII text)
-  pub column: u32,
-
-  /// The length of the span represented by this structure
-  pub length: usize,
-}
-
-impl NodeSpan {
-  /// Return a 0-length span located at the start of the given source
-  ///
-  /// This may be used in span range queries.
-  pub fn new_start(source_id: usize) -> Self {
-    Self {
-      source_id,
-      offset: 0,
-      line: 1,
-      column: 0,
-      length: 0,
-    }
-  }
-
-  /// Return a 0-length span located at the end of the given source (as indicated by the offset)
-  ///
-  /// This may be used in span range queries.
-  pub fn new_end(source_id: usize, length: usize) -> Self {
-    Self {
-      source_id,
-      offset: length,
-      line: 1,
-      column: 0,
-      length: 0,
-    }
-  }
-
-  /// Return a 0-length span located at the end point of this span.
-  ///
-  /// This may be used in span range queries. Note that the line and column information will not be
-  /// accurate.
-  pub fn to_end_location(&self) -> Self {
-    Self {
-      source_id: self.source_id,
-      line: self.line,
-      column: self.column,
-      offset: self.offset + self.length,
-      length: 0,
-    }
-  }
-}
-
-impl std::convert::From<(usize, ParseInput<'_, '_, '_>)> for NodeSpan {
-  fn from((source_id, span): (usize, ParseInput<'_, '_, '_>)) -> Self {
-    Self {
-      source_id,
-      offset: span.location_offset(),
-      line: span.location_line(),
-      column: span.get_column() as u32,
-      length: span.fragment().len(),
-    }
-  }
-}
-
-impl std::cmp::PartialOrd for NodeSpan {
-  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-    Some(self.source_id.cmp(&other.source_id).then_with(|| {
-      self
-        .offset
-        .cmp(&other.offset)
-        .then_with(|| other.length.cmp(&self.length))
-    }))
-  }
-}
-
-pub trait NodeContents: std::fmt::Debug + Clone + PartialEq + Sized {
-  fn into_node(self) -> Node<Self> {
-    Node::new(self, None)
-  }
-}
-
-/// A syntax node with span information
-#[derive(Debug, Clone, PartialEq)]
-pub struct Node<T: NodeContents> {
-  pub contents: T,
-  pub span_id: Option<NonZeroUsize>,
-}
-
-impl<T: NodeContents> Node<T> {
-  /// Create a new syntax node with span information
-  pub fn new(contents: T, span_id: Option<NonZeroUsize>) -> Self {
-    Self { contents, span_id }
-  }
-
-  /// Return the wrapped syntax node, discarding the span information
-  pub fn into_inner(self) -> T {
-    self.contents
-  }
-
-  /// Map this contents of this node into a new node
-  pub fn map<U: NodeContents>(self, f: impl FnOnce(T) -> U) -> Node<U> {
-    Node {
-      contents: f(self.contents),
-      span_id: self.span_id,
-    }
-  }
-}
-
-impl<T: NodeContents> std::ops::Deref for Node<T> {
-  type Target = T;
-
-  fn deref(&self) -> &Self::Target {
-    &self.contents
-  }
-}
-
-impl<T: NodeContents> std::ops::DerefMut for Node<T> {
-  fn deref_mut(&mut self) -> &mut Self::Target {
-    &mut self.contents
-  }
-}
-
-// Wrapped syntax nodes can be used as syntax nodes
-impl<T: NodeContents> NodeContents for Node<T> {}
-
-// Trivial copy for the node if the wrapped contents are Copy
-impl<T: NodeContents + Copy> Copy for Node<T> {}
-
-// Display implementation for wrapped node
-impl<T: NodeContents + std::fmt::Display> std::fmt::Display for Node<T> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    <T as std::fmt::Display>::fmt(&self.contents, f)
-  }
-}
+mod node;
+pub use node::*;
 
 /// A non-empty [`Vec`]. It has at least one element.
 #[derive(Clone, Debug, PartialEq)]
@@ -251,8 +106,14 @@ impl<T> Extend<T> for NonEmpty<T> {
   }
 }
 
+impl<T: NodeContentsEq> NodeContentsEq for NonEmpty<T> {
+  fn contents_eq(&self, other: &Self) -> bool {
+    self.0.contents_eq(&other.0)
+  }
+}
+
 /// A path literal.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Path {
   /// Specified with angle brackets.
   Absolute(String),
@@ -282,7 +143,7 @@ impl fmt::Display for IdentifierError {
 }
 
 /// A generic identifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct Identifier(pub String);
 
 impl Identifier {
@@ -338,9 +199,6 @@ impl fmt::Display for Identifier {
   }
 }
 
-impl NodeContents for Identifier {}
-impl NodeContents for &Identifier {}
-
 impl<'a> From<&'a str> for Node<Identifier> {
   fn from(s: &str) -> Self {
     Node::new(Identifier(s.to_owned()), None)
@@ -354,7 +212,7 @@ impl From<String> for Node<Identifier> {
 }
 
 /// Any type name.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct TypeName(pub String);
 
 impl TypeName {
@@ -398,7 +256,7 @@ impl fmt::Display for TypeName {
 }
 
 /// Type specifier (non-array).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum TypeSpecifierNonArray {
   // transparent types
   Void,
@@ -522,7 +380,7 @@ pub enum TypeSpecifierNonArray {
 }
 
 /// Type specifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct TypeSpecifier {
   pub ty: TypeSpecifierNonArray,
   pub array_specifier: Option<ArraySpecifier>,
@@ -544,14 +402,14 @@ impl From<TypeSpecifierNonArray> for TypeSpecifier {
 }
 
 /// Struct specifier. Used to create new, user-defined types.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct StructSpecifier {
   pub name: Option<TypeName>,
   pub fields: NonEmpty<StructFieldSpecifier>,
 }
 
 /// Struct field specifier. Used to add fields to struct specifiers.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct StructFieldSpecifier {
   pub qualifier: Option<TypeQualifier>,
   pub ty: TypeSpecifier,
@@ -586,7 +444,7 @@ impl StructFieldSpecifier {
 }
 
 /// An identifier with an optional array specifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct ArrayedIdentifier {
   pub ident: Node<Identifier>,
   pub array_spec: Option<ArraySpecifier>,
@@ -624,13 +482,13 @@ impl From<Node<Identifier>> for ArrayedIdentifier {
 }
 
 /// Type qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct TypeQualifier {
   pub qualifiers: NonEmpty<TypeQualifierSpec>,
 }
 
 /// Type qualifier spec.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum TypeQualifierSpec {
   Storage(StorageQualifier),
   Layout(LayoutQualifier),
@@ -641,7 +499,7 @@ pub enum TypeQualifierSpec {
 }
 
 /// Storage qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum StorageQualifier {
   Const,
   InOut,
@@ -664,20 +522,20 @@ pub enum StorageQualifier {
 }
 
 /// Layout qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct LayoutQualifier {
   pub ids: NonEmpty<LayoutQualifierSpec>,
 }
 
 /// Layout qualifier spec.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum LayoutQualifierSpec {
   Identifier(Node<Identifier>, Option<Box<Expr>>),
   Shared,
 }
 
 /// Precision qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PrecisionQualifier {
   High,
   Medium,
@@ -685,7 +543,7 @@ pub enum PrecisionQualifier {
 }
 
 /// Interpolation qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum InterpolationQualifier {
   Smooth,
   Flat,
@@ -693,7 +551,7 @@ pub enum InterpolationQualifier {
 }
 
 /// Fully specified type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct FullySpecifiedType {
   pub qualifier: Option<TypeQualifier>,
   pub ty: TypeSpecifier,
@@ -718,21 +576,21 @@ impl From<TypeSpecifierNonArray> for FullySpecifiedType {
 }
 
 /// Dimensionality of an array.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct ArraySpecifier {
   /// List of all the dimensions – possibly unsized or explicitly-sized.
   pub dimensions: NonEmpty<ArraySpecifierDimension>,
 }
 
 /// One array specifier dimension.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum ArraySpecifierDimension {
   Unsized,
   ExplicitlySized(Box<Expr>),
 }
 
 /// A declaration.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Declaration {
   FunctionPrototype(FunctionPrototype),
   InitDeclaratorList(InitDeclaratorList),
@@ -741,12 +599,9 @@ pub enum Declaration {
   Global(TypeQualifier, Vec<Node<Identifier>>),
 }
 
-impl NodeContents for Declaration {}
-impl NodeContents for &Declaration {}
-
 /// A general purpose block, containing fields and possibly a list of declared identifiers. Semantic
 /// is given with the storage qualifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct Block {
   pub qualifier: TypeQualifier,
   pub name: Node<Identifier>,
@@ -755,7 +610,7 @@ pub struct Block {
 }
 
 /// Function identifier.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum FunIdentifier {
   Identifier(Node<Identifier>),
   Expr(Box<Expr>),
@@ -771,7 +626,7 @@ impl FunIdentifier {
 }
 
 /// Function prototype.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct FunctionPrototype {
   pub ty: FullySpecifiedType,
   pub name: Node<Identifier>,
@@ -779,7 +634,7 @@ pub struct FunctionPrototype {
 }
 
 /// Function parameter declaration.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum FunctionParameterDeclaration {
   Named(Option<TypeQualifier>, FunctionParameterDeclarator),
   Unnamed(Option<TypeQualifier>, TypeSpecifier),
@@ -810,21 +665,21 @@ impl FunctionParameterDeclaration {
 }
 
 /// Function parameter declarator.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct FunctionParameterDeclarator {
   pub ty: TypeSpecifier,
   pub ident: ArrayedIdentifier,
 }
 
 /// Init declarator list.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct InitDeclaratorList {
   pub head: SingleDeclaration,
   pub tail: Vec<SingleDeclarationNoType>,
 }
 
 /// Single declaration.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct SingleDeclaration {
   pub ty: FullySpecifiedType,
   pub name: Option<Node<Identifier>>,
@@ -833,14 +688,14 @@ pub struct SingleDeclaration {
 }
 
 /// A single declaration with implicit, already-defined type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct SingleDeclarationNoType {
   pub ident: ArrayedIdentifier,
   pub initializer: Option<Initializer>,
 }
 
 /// Initializer.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Initializer {
   Simple(Box<Expr>),
   List(NonEmpty<Initializer>),
@@ -857,7 +712,7 @@ impl From<Expr> for Initializer {
 /// then an expression which evaluates to what the statement “returns”.
 ///
 /// An expression is either an assignment or a list (comma) of assignments.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Expr {
   /// A variable expression, using an identifier.
   Variable(Node<Identifier>),
@@ -925,7 +780,7 @@ impl From<f64> for Expr {
 }
 
 /// All unary operators that exist in GLSL.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum UnaryOp {
   Inc,
   Dec,
@@ -936,7 +791,7 @@ pub enum UnaryOp {
 }
 
 /// All binary operators that exist in GLSL.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum BinaryOp {
   Or,
   Xor,
@@ -960,7 +815,7 @@ pub enum BinaryOp {
 }
 
 /// All possible operators for assigning expressions.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum AssignmentOp {
   Equal,
   Mult,
@@ -976,7 +831,7 @@ pub enum AssignmentOp {
 }
 
 /// Starting rule.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct TranslationUnit(pub NonEmpty<Node<ExternalDeclaration>>);
 
 /// A shader stage.
@@ -1039,15 +894,12 @@ impl<'a> IntoIterator for &'a mut TranslationUnit {
 }
 
 /// External declaration.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum ExternalDeclaration {
-  Preprocessor(Preprocessor),
-  FunctionDefinition(FunctionDefinition),
-  Declaration(Declaration),
+  Preprocessor(Node<Preprocessor>),
+  FunctionDefinition(Node<FunctionDefinition>),
+  Declaration(Node<Declaration>),
 }
-
-impl NodeContents for ExternalDeclaration {}
-impl NodeContents for &ExternalDeclaration {}
 
 impl ExternalDeclaration {
   /// Create a new function.
@@ -1058,16 +910,19 @@ impl ExternalDeclaration {
     A: IntoIterator<Item = FunctionParameterDeclaration>,
     S: IntoIterator<Item = Statement>,
   {
-    ExternalDeclaration::FunctionDefinition(FunctionDefinition {
-      prototype: FunctionPrototype {
-        ty: ret_ty.into(),
-        name: name.into(),
-        parameters: args.into_iter().collect(),
-      },
-      statement: CompoundStatement {
-        statement_list: body.into_iter().collect(),
-      },
-    })
+    ExternalDeclaration::FunctionDefinition(
+      FunctionDefinition {
+        prototype: FunctionPrototype {
+          ty: ret_ty.into(),
+          name: name.into(),
+          parameters: args.into_iter().collect(),
+        },
+        statement: CompoundStatement {
+          statement_list: body.into_iter().collect(),
+        },
+      }
+      .into_node(),
+    )
   }
 
   /// Create a new structure.
@@ -1103,24 +958,22 @@ impl ExternalDeclaration {
             initializer: None,
           },
           tail: vec![],
-        }),
+        })
+        .into_node(),
       ))
     }
   }
 }
 
 /// Function definition.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct FunctionDefinition {
   pub prototype: FunctionPrototype,
   pub statement: CompoundStatement,
 }
 
-impl NodeContents for FunctionDefinition {}
-impl NodeContents for &FunctionDefinition {}
-
 /// Compound statement (with no new scope).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct CompoundStatement {
   pub statement_list: Vec<Statement>,
 }
@@ -1137,7 +990,7 @@ impl FromIterator<Statement> for CompoundStatement {
 }
 
 /// Statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Statement {
   Compound(Box<CompoundStatement>),
   Simple(Box<SimpleStatement>),
@@ -1184,7 +1037,7 @@ impl Statement {
 }
 
 /// Simple statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum SimpleStatement {
   Declaration(Declaration),
   Expression(ExprStatement),
@@ -1261,14 +1114,14 @@ impl SimpleStatement {
 pub type ExprStatement = Option<Expr>;
 
 /// Selection statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct SelectionStatement {
   pub cond: Box<Expr>,
   pub rest: SelectionRestStatement,
 }
 
 /// Condition.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Condition {
   Expr(Box<Expr>),
   Assignment(FullySpecifiedType, Node<Identifier>, Initializer),
@@ -1281,7 +1134,7 @@ impl From<Expr> for Condition {
 }
 
 /// Selection rest statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum SelectionRestStatement {
   /// Body of the if.
   Statement(Box<Statement>),
@@ -1290,21 +1143,21 @@ pub enum SelectionRestStatement {
 }
 
 /// Switch statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct SwitchStatement {
   pub head: Box<Expr>,
   pub body: Vec<Statement>,
 }
 
 /// Case label statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum CaseLabel {
   Case(Box<Expr>),
   Def,
 }
 
 /// Iteration statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum IterationStatement {
   While(Condition, Box<Statement>),
   DoWhile(Box<Statement>, Box<Expr>),
@@ -1312,21 +1165,21 @@ pub enum IterationStatement {
 }
 
 /// For init statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum ForInitStatement {
   Expression(Option<Expr>),
   Declaration(Box<Declaration>),
 }
 
 /// For init statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct ForRestStatement {
   pub condition: Option<Condition>,
   pub post_expr: Option<Box<Expr>>,
 }
 
 /// Jump statement.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum JumpStatement {
   Continue,
   Break,
@@ -1339,7 +1192,7 @@ pub enum JumpStatement {
 /// As it’s important to carry them around the AST because they cannot be substituted in a normal
 /// preprocessor (they’re used by GPU’s compilers), those preprocessor directives are available for
 /// inspection.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Preprocessor {
   Define(PreprocessorDefine),
   Else,
@@ -1357,13 +1210,10 @@ pub enum Preprocessor {
   Extension(PreprocessorExtension),
 }
 
-impl NodeContents for Preprocessor {}
-impl NodeContents for &Preprocessor {}
-
 /// A #define preprocessor directive.
 ///
 /// Allows any expression but only Integer and Float literals make sense
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PreprocessorDefine {
   ObjectLike {
     ident: Node<Identifier>,
@@ -1378,43 +1228,43 @@ pub enum PreprocessorDefine {
 }
 
 /// An #else preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorElseIf {
   pub condition: String,
 }
 
 /// An #error preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorError {
   pub message: String,
 }
 
 /// An #if preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorIf {
   pub condition: String,
 }
 
 /// An #ifdef preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorIfDef {
   pub ident: Node<Identifier>,
 }
 
 /// A #ifndef preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorIfNDef {
   pub ident: Node<Identifier>,
 }
 
 /// An #include name annotation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorInclude {
   pub path: Path,
 }
 
 /// A #line preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorLine {
   pub line: u32,
   pub source_string_number: Option<u32>,
@@ -1422,26 +1272,26 @@ pub struct PreprocessorLine {
 
 /// A #pragma preprocessor directive.
 /// Holds compiler-specific command.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorPragma {
   pub command: String,
 }
 
 /// A #undef preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorUndef {
   pub name: Node<Identifier>,
 }
 
 /// A #version preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorVersion {
   pub version: u16,
   pub profile: Option<PreprocessorVersionProfile>,
 }
 
 /// A #version profile annotation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PreprocessorVersionProfile {
   Core,
   Compatibility,
@@ -1449,14 +1299,14 @@ pub enum PreprocessorVersionProfile {
 }
 
 /// An #extension preprocessor directive.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorExtension {
   pub name: PreprocessorExtensionName,
   pub behavior: Option<PreprocessorExtensionBehavior>,
 }
 
 /// An #extension name annotation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PreprocessorExtensionName {
   /// All extensions you could ever imagine in your whole lifetime (how crazy is that!).
   All,
@@ -1465,7 +1315,7 @@ pub enum PreprocessorExtensionName {
 }
 
 /// An #extension behavior annotation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PreprocessorExtensionBehavior {
   Require,
   Enable,
@@ -1474,7 +1324,7 @@ pub enum PreprocessorExtensionBehavior {
 }
 
 /// A borrowed comment
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, NodeContents)]
 pub enum Comment<'s> {
   /// Single-line comment
   Single(Cow<'s, str>),
@@ -1497,9 +1347,6 @@ impl Comment<'_> {
     }
   }
 }
-
-impl NodeContents for Comment<'_> {}
-impl NodeContents for &Comment<'_> {}
 
 #[cfg(test)]
 mod tests {

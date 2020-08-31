@@ -12,12 +12,12 @@ use nom::{AsBytes, InputLength, Slice};
 
 use super::ParseInput;
 
-pub(crate) type ParserResult<'c, 'd, 'e, O> =
+pub type ParserResult<'c, 'd, 'e, O> =
   IResult<ParseInput<'c, 'd, 'e>, O, VerboseError<ParseInput<'c, 'd, 'e>>>;
 
 // A constant parser that just forwards the value it’s parametered with without reading anything
 // from the input. Especially useful as “fallback” in an alternative parser.
-pub(crate) fn cnst<'c, 'd, 'e, T, E>(
+pub fn cnst<'c, 'd, 'e, T, E>(
   t: T,
 ) -> impl Fn(ParseInput<'c, 'd, 'e>) -> Result<(ParseInput<'c, 'd, 'e>, T), E>
 where
@@ -31,7 +31,7 @@ where
 // End-of-input parser.
 //
 // Yields `()` if the parser is at the end of the input; an error otherwise.
-pub(crate) fn eoi<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
+pub fn eoi<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   if i.input_len() == 0 {
     Ok((i, ()))
   } else {
@@ -45,7 +45,7 @@ pub(crate) fn eoi<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd,
 //
 // - A newline.
 // - The end of input.
-pub(crate) fn eol<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
+pub fn eol<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   alt((
     eoi, // this one goes first because it’s very cheap
     value((), newline),
@@ -53,7 +53,7 @@ pub(crate) fn eol<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd,
 }
 
 // Apply the `f` parser until `g` succeeds. Both parsers consume the input.
-pub(crate) fn till<'c, 'd, 'e, A, B, F, G>(
+pub fn till<'c, 'd, 'e, A, B, F, G>(
   f: F,
   g: G,
 ) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()>
@@ -74,7 +74,7 @@ where
 }
 
 // A version of many0 that discards the result of the parser, preventing allocating.
-pub(crate) fn many0_<'c, 'd, 'e, A, F>(
+pub fn many0_<'c, 'd, 'e, A, F>(
   f: F,
 ) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()>
 where
@@ -90,7 +90,7 @@ where
 /// This parser accepts the multiline annotation (\) to break the string on several lines.
 ///
 /// Discard any leading newline.
-pub(crate) fn str_till_eol<'c, 'd, 'e>(
+pub fn str_till_eol<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   map(
@@ -110,7 +110,7 @@ pub(crate) fn str_till_eol<'c, 'd, 'e>(
 // This parser succeeds with multispaces and multiline annotation.
 //
 // Taylor Swift loves it.
-pub(crate) fn blank_space<'c, 'd, 'e>(
+pub fn blank_space<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   recognize(many0_(alt((multispace1, tag("\\\n")))))(i)

@@ -1577,11 +1577,11 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::assert_ceq;
+  use crate::parser::Parse;
 
   #[test]
   fn roundtrip_glsl_complex_expr() {
-    use crate::parser::Parse;
-
     let zero = syntax::Expr::DoubleConst(0.);
     let ray = syntax::Expr::Variable("ray".into());
     let raydir = syntax::Expr::Dot(Box::new(ray), "dir".into());
@@ -1607,6 +1607,6 @@ mod tests {
 
     let back = syntax::Expr::parse(&output);
 
-    assert_eq!(back, Ok(input), "intermediate source '{}'", output);
+    assert_ceq!(back, Ok(input), "intermediate source '{}'", output);
   }
 }

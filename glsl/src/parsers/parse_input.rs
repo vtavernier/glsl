@@ -5,13 +5,12 @@ use nom_locate::LocatedSpan;
 
 use crate::syntax;
 
-pub type ContextComments<'s> = std::collections::HashMap<usize, syntax::Node<syntax::Comment<'s>>>;
-pub type ContextSpans = bimap::BiBTreeMap<syntax::NodeSpan, NonZeroUsize>;
+pub type ContextComments<'s> =
+  std::collections::BTreeMap<syntax::NodeSpan, syntax::Node<syntax::Comment<'s>>>;
 
 #[derive(Debug, Clone)]
 pub struct ParseContextData<'s> {
   comments: Option<ContextComments<'s>>,
-  spans: Option<ContextSpans>,
   current_id: NonZeroUsize,
   current_source: usize,
   source_ends: Vec<usize>,
@@ -21,17 +20,6 @@ impl<'s> ParseContextData<'s> {
   pub fn new() -> Self {
     Self {
       comments: None,
-      spans: None,
-      current_id: unsafe { NonZeroUsize::new_unchecked(1) },
-      current_source: 0,
-      source_ends: Vec::new(),
-    }
-  }
-
-  pub fn with_spans() -> Self {
-    Self {
-      comments: None,
-      spans: Some(Default::default()),
       current_id: unsafe { NonZeroUsize::new_unchecked(1) },
       current_source: 0,
       source_ends: Vec::new(),
@@ -41,7 +29,6 @@ impl<'s> ParseContextData<'s> {
   pub fn with_comments() -> Self {
     Self {
       comments: Some(Default::default()),
-      spans: Some(Default::default()),
       current_id: unsafe { NonZeroUsize::new_unchecked(1) },
       current_source: 0,
       source_ends: Vec::new(),
@@ -50,18 +37,6 @@ impl<'s> ParseContextData<'s> {
 
   pub fn comments(&self) -> Option<&ContextComments<'s>> {
     self.comments.as_ref()
-  }
-
-  pub fn spans(&self) -> Option<&ContextSpans> {
-    self.spans.as_ref()
-  }
-
-  pub fn get_span(&self, span_id: Option<NonZeroUsize>) -> Option<&syntax::NodeSpan> {
-    if let (Some(id), Some(spans)) = (span_id, self.spans.as_ref()) {
-      return spans.get_by_right(&id);
-    }
-
-    None
   }
 
   pub fn get_source(&self) -> Option<usize> {
@@ -101,21 +76,18 @@ impl<'s> ParseContextData<'s> {
     // Decrement current_source
     self.current_source -= 1;
 
-    let mut delete_spans = std::collections::HashSet::new();
-
-    // Remove spans referring to this source
-    if let Some(spans) = self.spans.as_mut() {
-      // There is no retain method on a BiBTreeMap
-      let start = syntax::NodeSpan::new_start(remove_source_id);
-      delete_spans.extend(spans.left_range(&start..).map(|(_, r)| *r));
-      for span in &delete_spans {
-        spans.remove_by_right(&span);
-      }
-    }
-
     // Remove comments referring to this source
     if let Some(comments) = self.comments.as_mut() {
-      comments.retain(|i, _| !delete_spans.contains(&unsafe { NonZeroUsize::new_unchecked(*i) }));
+      let mut spans = Vec::new();
+      for cmt in comments.iter() {
+        if cmt.0.source_id == remove_source_id {
+          spans.push(*cmt.0);
+        }
+      }
+
+      for span in spans {
+        comments.remove(&span);
+      }
     }
   }
 
@@ -125,48 +97,15 @@ impl<'s> ParseContextData<'s> {
     self.source_ends.push(0);
     res
   }
-
-  fn commit_span<T: syntax::NodeContents>(
-    &mut self,
-    contents: T,
-    span: syntax::NodeSpan,
-  ) -> syntax::Node<T> {
-    assert!(
-      span.source_id < self.current_source,
-      "span.source_id is out of range"
-    );
-
-    let span_id = if let Some(s) = &mut self.spans {
-      if let Some(existing) = s.get_by_left(&span) {
-        Some(*existing)
-      } else {
-        let span_id = self.current_id;
-        self.current_id = NonZeroUsize::new(span_id.get() + 1).unwrap();
-
-        s.insert_no_overwrite(span, span_id)
-          .expect("another span covering the same range already exists");
-
-        if let Some(se) = self.source_ends.get_mut(span.source_id) {
-          *se = (*se).max(span.offset + span.length);
-        }
-
-        Some(span_id)
-      }
-    } else {
-      None
-    };
-
-    syntax::Node::new(contents, span_id)
-  }
 }
 
 #[derive(Debug)]
-pub(crate) struct ParseContext<'s, 'd> {
+pub struct ParseContext<'s, 'd> {
   data: RefCell<&'d mut ParseContextData<'s>>,
   source_id: usize,
 }
 
-pub(crate) struct ContextData<'b, 's, 'd> {
+pub struct ContextData<'b, 's, 'd> {
   guard: std::cell::Ref<'b, &'d mut ParseContextData<'s>>,
 }
 
@@ -207,42 +146,44 @@ impl<'s, 'd> ParseContext<'s, 'd> {
   pub fn add_comment(&self, cmt: syntax::Node<syntax::Comment<'s>>) {
     if let Some(c) = self.data.borrow_mut().comments.as_mut() {
       // If we're tracking comments we are also tracking spans
-      c.insert(cmt.span_id.unwrap().get(), cmt);
+      c.insert(cmt.span.unwrap(), cmt);
     }
   }
 
-  pub fn commit_span<T: syntax::NodeContents>(
-    &self,
-    contents: T,
-    span: ParseInput,
-  ) -> syntax::Node<T> {
-    self
-      .data
-      .borrow_mut()
-      .commit_span(contents, (self.source_id, span).into())
+  pub fn current_source(&self) -> usize {
+    self.source_id
   }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ParseInput<'c, 'd, 'e> {
+pub struct ParseInput<'c, 'd, 'e> {
   input: LocatedSpan<&'c str>,
-  context: &'e ParseContext<'c, 'd>,
+  context: Option<&'e ParseContext<'c, 'd>>,
 }
 
 impl<'c, 'd, 'e> ParseInput<'c, 'd, 'e> {
   fn new(input: &'c str, context: &'e ParseContext<'c, 'd>) -> Self {
     Self {
       input: LocatedSpan::new(input),
-      context,
+      context: Some(context),
     }
   }
 
-  pub fn context(&self) -> &'e ParseContext<'c, 'd> {
+  pub fn context(&self) -> Option<&'e ParseContext<'c, 'd>> {
     self.context
   }
 
   pub fn fragment(&self) -> &'c str {
     self.input.fragment()
+  }
+}
+
+impl<'c, 'd, 'e> From<&'c str> for ParseInput<'c, 'd, 'e> {
+  fn from(input: &'c str) -> Self {
+    Self {
+      input: LocatedSpan::new(input),
+      context: None,
+    }
   }
 }
 
