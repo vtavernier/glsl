@@ -144,10 +144,10 @@ impl fmt::Display for IdentifierError {
 
 /// A generic identifier.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub struct Identifier(pub String);
+pub struct IdentifierData(pub String);
 
-impl Identifier {
-  /// Create a new [`Identifier`].
+impl IdentifierData {
+  /// Create a new [`IdentifierData`].
   ///
   /// # Errors
   ///
@@ -171,7 +171,7 @@ impl Identifier {
       // check we only have ASCII alphanumeric characters
       Err(IdentifierError::ContainsNonASCIIAlphaNum)
     } else {
-      Ok(Identifier(name))
+      Ok(Self(name))
     }
   }
 
@@ -181,33 +181,21 @@ impl Identifier {
   }
 }
 
-impl<'a> From<&'a str> for Identifier {
+impl<'a> From<&'a str> for IdentifierData {
   fn from(s: &str) -> Self {
-    Identifier(s.to_owned())
+    Self(s.to_owned())
   }
 }
 
-impl From<String> for Identifier {
+impl From<String> for IdentifierData {
   fn from(s: String) -> Self {
-    Identifier(s)
+    Self(s)
   }
 }
 
-impl fmt::Display for Identifier {
+impl fmt::Display for IdentifierData {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
     self.0.fmt(f)
-  }
-}
-
-impl<'a> From<&'a str> for Node<Identifier> {
-  fn from(s: &str) -> Self {
-    Node::new(Identifier(s.to_owned()), None)
-  }
-}
-
-impl From<String> for Node<Identifier> {
-  fn from(s: String) -> Self {
-    Node::new(Identifier(s), None)
   }
 }
 
@@ -227,7 +215,7 @@ impl TypeName {
     N: Into<String>,
   {
     // build as identifier and unwrap into type name
-    let Identifier(tn) = Identifier::new(name)?;
+    let IdentifierData(tn) = IdentifierData::new(name)?;
     Ok(TypeName(tn))
   }
 
@@ -446,14 +434,14 @@ impl StructFieldSpecifier {
 /// An identifier with an optional array specifier.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct ArrayedIdentifier {
-  pub ident: Node<Identifier>,
+  pub ident: Identifier,
   pub array_spec: Option<ArraySpecifier>,
 }
 
 impl ArrayedIdentifier {
   pub fn new<I, AS>(ident: I, array_spec: AS) -> Self
   where
-    I: Into<Node<Identifier>>,
+    I: Into<Identifier>,
     AS: Into<Option<ArraySpecifier>>,
   {
     ArrayedIdentifier {
@@ -466,16 +454,7 @@ impl ArrayedIdentifier {
 impl<'a> From<&'a str> for ArrayedIdentifier {
   fn from(ident: &str) -> Self {
     ArrayedIdentifier {
-      ident: Identifier(ident.to_owned()).into_node(),
-      array_spec: None,
-    }
-  }
-}
-
-impl From<Node<Identifier>> for ArrayedIdentifier {
-  fn from(ident: Node<Identifier>) -> Self {
-    ArrayedIdentifier {
-      ident,
+      ident: IdentifierData(ident.to_owned()).into(),
       array_spec: None,
     }
   }
@@ -530,7 +509,7 @@ pub struct LayoutQualifier {
 /// Layout qualifier spec.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum LayoutQualifierSpec {
-  Identifier(Node<Identifier>, Option<Box<Expr>>),
+  Identifier(Identifier, Option<Box<Expr>>),
   Shared,
 }
 
@@ -591,12 +570,12 @@ pub enum ArraySpecifierDimension {
 
 /// A declaration.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub enum Declaration {
+pub enum DeclarationData {
   FunctionPrototype(FunctionPrototype),
   InitDeclaratorList(InitDeclaratorList),
   Precision(PrecisionQualifier, TypeSpecifier),
   Block(Block),
-  Global(TypeQualifier, Vec<Node<Identifier>>),
+  Global(TypeQualifier, Vec<Identifier>),
 }
 
 /// A general purpose block, containing fields and possibly a list of declared identifiers. Semantic
@@ -604,7 +583,7 @@ pub enum Declaration {
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct Block {
   pub qualifier: TypeQualifier,
-  pub name: Node<Identifier>,
+  pub name: Identifier,
   pub fields: Vec<StructFieldSpecifier>,
   pub identifier: Option<ArrayedIdentifier>,
 }
@@ -612,7 +591,7 @@ pub struct Block {
 /// Function identifier.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum FunIdentifier {
-  Identifier(Node<Identifier>),
+  Identifier(Identifier),
   Expr(Box<Expr>),
 }
 
@@ -627,20 +606,20 @@ impl FunIdentifier {
 
 /// Function prototype.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub struct FunctionPrototype {
+pub struct FunctionPrototypeData {
   pub ty: FullySpecifiedType,
-  pub name: Node<Identifier>,
+  pub name: Identifier,
   pub parameters: Vec<FunctionParameterDeclaration>,
 }
 
 /// Function parameter declaration.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub enum FunctionParameterDeclaration {
+pub enum FunctionParameterDeclarationData {
   Named(Option<TypeQualifier>, FunctionParameterDeclarator),
   Unnamed(Option<TypeQualifier>, TypeSpecifier),
 }
 
-impl FunctionParameterDeclaration {
+impl FunctionParameterDeclarationData {
   /// Create a named function argument.
   pub fn new_named<I, T>(ident: I, ty: T) -> Self
   where
@@ -652,7 +631,7 @@ impl FunctionParameterDeclaration {
       ident: ident.into(),
     };
 
-    FunctionParameterDeclaration::Named(None, declator)
+    Self::Named(None, declator)
   }
 
   /// Create an unnamed function argument (mostly useful for interfaces / function prototypes).
@@ -660,7 +639,7 @@ impl FunctionParameterDeclaration {
   where
     T: Into<TypeSpecifier>,
   {
-    FunctionParameterDeclaration::Unnamed(None, ty.into())
+    Self::Unnamed(None, ty.into())
   }
 }
 
@@ -682,7 +661,7 @@ pub struct InitDeclaratorList {
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct SingleDeclaration {
   pub ty: FullySpecifiedType,
-  pub name: Option<Node<Identifier>>,
+  pub name: Option<Identifier>,
   pub array_specifier: Option<ArraySpecifier>,
   pub initializer: Option<Initializer>,
 }
@@ -715,7 +694,7 @@ impl From<Expr> for Initializer {
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Expr {
   /// A variable expression, using an identifier.
-  Variable(Node<Identifier>),
+  Variable(Identifier),
   /// Integral constant expression.
   IntConst(i32),
   /// Unsigned integral constant expression.
@@ -740,7 +719,7 @@ pub enum Expr {
   /// A functional call. It has a function identifier and a list of expressions (arguments).
   FunCall(FunIdentifier, Vec<Expr>),
   /// An expression associated with a field selection (struct).
-  Dot(Box<Expr>, Node<Identifier>),
+  Dot(Box<Expr>, Identifier),
   /// Post-incrementation of an expression.
   PostInc(Box<Expr>),
   /// Post-decrementation of an expression.
@@ -832,7 +811,7 @@ pub enum AssignmentOp {
 
 /// Starting rule.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub struct TranslationUnit(pub NonEmpty<Node<ExternalDeclaration>>);
+pub struct TranslationUnit(pub NonEmpty<ExternalDeclaration>);
 
 /// A shader stage.
 pub type ShaderStage = TranslationUnit;
@@ -846,14 +825,14 @@ impl TranslationUnit {
   /// `None` if the iterator yields no value.
   pub fn from_non_empty_iter<I>(iter: I) -> Option<Self>
   where
-    I: IntoIterator<Item = Node<ExternalDeclaration>>,
+    I: IntoIterator<Item = ExternalDeclaration>,
   {
     NonEmpty::from_non_empty_iter(iter).map(TranslationUnit)
   }
 }
 
 impl Deref for TranslationUnit {
-  type Target = NonEmpty<Node<ExternalDeclaration>>;
+  type Target = NonEmpty<ExternalDeclaration>;
 
   fn deref(&self) -> &Self::Target {
     &self.0
@@ -867,8 +846,8 @@ impl DerefMut for TranslationUnit {
 }
 
 impl IntoIterator for TranslationUnit {
-  type IntoIter = <NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
-  type Item = Node<ExternalDeclaration>;
+  type IntoIter = <NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
+  type Item = ExternalDeclaration;
 
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_iter()
@@ -876,8 +855,8 @@ impl IntoIterator for TranslationUnit {
 }
 
 impl<'a> IntoIterator for &'a TranslationUnit {
-  type IntoIter = <&'a NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
-  type Item = &'a Node<ExternalDeclaration>;
+  type IntoIter = <&'a NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
+  type Item = &'a ExternalDeclaration;
 
   fn into_iter(self) -> Self::IntoIter {
     (&self.0).into_iter()
@@ -885,8 +864,8 @@ impl<'a> IntoIterator for &'a TranslationUnit {
 }
 
 impl<'a> IntoIterator for &'a mut TranslationUnit {
-  type IntoIter = <&'a mut NonEmpty<Node<ExternalDeclaration>> as IntoIterator>::IntoIter;
-  type Item = &'a mut Node<ExternalDeclaration>;
+  type IntoIter = <&'a mut NonEmpty<ExternalDeclaration> as IntoIterator>::IntoIter;
+  type Item = &'a mut ExternalDeclaration;
 
   fn into_iter(self) -> Self::IntoIter {
     (&mut self.0).into_iter()
@@ -895,33 +874,35 @@ impl<'a> IntoIterator for &'a mut TranslationUnit {
 
 /// External declaration.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub enum ExternalDeclaration {
-  Preprocessor(Node<Preprocessor>),
-  FunctionDefinition(Node<FunctionDefinition>),
-  Declaration(Node<Declaration>),
+pub enum ExternalDeclarationData {
+  Preprocessor(Preprocessor),
+  FunctionDefinition(FunctionDefinition),
+  Declaration(Declaration),
 }
 
-impl ExternalDeclaration {
+impl ExternalDeclarationData {
   /// Create a new function.
   pub fn new_fn<T, N, A, S>(ret_ty: T, name: N, args: A, body: S) -> Self
   where
     T: Into<FullySpecifiedType>,
-    N: Into<Node<Identifier>>,
+    N: Into<Identifier>,
     A: IntoIterator<Item = FunctionParameterDeclaration>,
     S: IntoIterator<Item = Statement>,
   {
-    ExternalDeclaration::FunctionDefinition(
-      FunctionDefinition {
-        prototype: FunctionPrototype {
+    Self::FunctionDefinition(
+      FunctionDefinitionData {
+        prototype: FunctionPrototypeData {
           ty: ret_ty.into(),
           name: name.into(),
           parameters: args.into_iter().collect(),
-        },
-        statement: CompoundStatement {
+        }
+        .into(),
+        statement: CompoundStatementData {
           statement_list: body.into_iter().collect(),
-        },
+        }
+        .into(),
       }
-      .into_node(),
+      .into(),
     )
   }
 
@@ -940,8 +921,8 @@ impl ExternalDeclaration {
     if fields.is_empty() {
       None
     } else {
-      Some(ExternalDeclaration::Declaration(
-        Declaration::InitDeclaratorList(InitDeclaratorList {
+      Some(Self::Declaration(
+        DeclarationData::InitDeclaratorList(InitDeclaratorList {
           head: SingleDeclaration {
             ty: FullySpecifiedType {
               qualifier: None,
@@ -959,7 +940,7 @@ impl ExternalDeclaration {
           },
           tail: vec![],
         })
-        .into_node(),
+        .into(),
       ))
     }
   }
@@ -967,23 +948,23 @@ impl ExternalDeclaration {
 
 /// Function definition.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub struct FunctionDefinition {
+pub struct FunctionDefinitionData {
   pub prototype: FunctionPrototype,
   pub statement: CompoundStatement,
 }
 
 /// Compound statement (with no new scope).
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub struct CompoundStatement {
+pub struct CompoundStatementData {
   pub statement_list: Vec<Statement>,
 }
 
-impl FromIterator<Statement> for CompoundStatement {
+impl FromIterator<Statement> for CompoundStatementData {
   fn from_iter<T>(iter: T) -> Self
   where
     T: IntoIterator<Item = Statement>,
   {
-    CompoundStatement {
+    Self {
       statement_list: iter.into_iter().collect(),
     }
   }
@@ -1005,9 +986,12 @@ impl Statement {
   {
     let case_stmt = Statement::Simple(Box::new(SimpleStatement::CaseLabel(case.into())));
 
-    Statement::Compound(Box::new(CompoundStatement {
-      statement_list: once(case_stmt).chain(statements.into_iter()).collect(),
-    }))
+    Statement::Compound(Box::new(
+      CompoundStatementData {
+        statement_list: once(case_stmt).chain(statements.into_iter()).collect(),
+      }
+      .into(),
+    ))
   }
 
   /// Declare a new variable.
@@ -1018,12 +1002,12 @@ impl Statement {
   pub fn declare_var<T, N, A, I>(ty: T, name: N, array_specifier: A, initializer: I) -> Self
   where
     T: Into<FullySpecifiedType>,
-    N: Into<Node<Identifier>>,
+    N: Into<Identifier>,
     A: Into<Option<ArraySpecifier>>,
     I: Into<Option<Initializer>>,
   {
     Statement::Simple(Box::new(SimpleStatement::Declaration(
-      Declaration::InitDeclaratorList(InitDeclaratorList {
+      DeclarationData::InitDeclaratorList(InitDeclaratorList {
         head: SingleDeclaration {
           ty: ty.into(),
           name: Some(name.into()),
@@ -1031,7 +1015,8 @@ impl Statement {
           initializer: initializer.into(),
         },
         tail: Vec::new(),
-      }),
+      })
+      .into(),
     )))
   }
 }
@@ -1124,7 +1109,7 @@ pub struct SelectionStatement {
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum Condition {
   Expr(Box<Expr>),
-  Assignment(FullySpecifiedType, Node<Identifier>, Initializer),
+  Assignment(FullySpecifiedType, Identifier, Initializer),
 }
 
 impl From<Expr> for Condition {
@@ -1193,7 +1178,7 @@ pub enum JumpStatement {
 /// preprocessor (they’re used by GPU’s compilers), those preprocessor directives are available for
 /// inspection.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
-pub enum Preprocessor {
+pub enum PreprocessorData {
   Define(PreprocessorDefine),
   Else,
   ElseIf(PreprocessorElseIf),
@@ -1216,13 +1201,13 @@ pub enum Preprocessor {
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub enum PreprocessorDefine {
   ObjectLike {
-    ident: Node<Identifier>,
+    ident: Identifier,
     value: String,
   },
 
   FunctionLike {
-    ident: Node<Identifier>,
-    args: Vec<Node<Identifier>>,
+    ident: Identifier,
+    args: Vec<Identifier>,
     value: String,
   },
 }
@@ -1248,13 +1233,13 @@ pub struct PreprocessorIf {
 /// An #ifdef preprocessor directive.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorIfDef {
-  pub ident: Node<Identifier>,
+  pub ident: Identifier,
 }
 
 /// A #ifndef preprocessor directive.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorIfNDef {
-  pub ident: Node<Identifier>,
+  pub ident: Identifier,
 }
 
 /// An #include name annotation.
@@ -1280,7 +1265,7 @@ pub struct PreprocessorPragma {
 /// A #undef preprocessor directive.
 #[derive(Clone, Debug, PartialEq, NodeContents)]
 pub struct PreprocessorUndef {
-  pub name: Node<Identifier>,
+  pub name: Identifier,
 }
 
 /// A #version preprocessor directive.
@@ -1354,13 +1339,13 @@ mod tests {
 
   #[test]
   fn create_new_identifier() {
-    assert!(Identifier::new("foo_bar").is_ok());
-    assert!(Identifier::new("3foo_bar").is_err());
-    assert!(Identifier::new("FooBar").is_ok());
-    assert!(Identifier::new("_FooBar").is_ok());
-    assert!(Identifier::new("foo3").is_ok());
-    assert!(Identifier::new("foo3_").is_ok());
-    assert!(Identifier::new("fδo3_").is_err());
+    assert!(IdentifierData::new("foo_bar").is_ok());
+    assert!(IdentifierData::new("3foo_bar").is_err());
+    assert!(IdentifierData::new("FooBar").is_ok());
+    assert!(IdentifierData::new("_FooBar").is_ok());
+    assert!(IdentifierData::new("foo3").is_ok());
+    assert!(IdentifierData::new("foo3_").is_ok());
+    assert!(IdentifierData::new("fδo3_").is_err());
   }
 
   #[test]
@@ -1379,13 +1364,10 @@ mod tests {
   // }
   #[test]
   fn declare_new_fn() {
-    let _ = ExternalDeclaration::new_fn(
+    let _ = ExternalDeclarationData::new_fn(
       TypeSpecifierNonArray::Bool,
       "predicate",
-      vec![FunctionParameterDeclaration::new_named(
-        "x",
-        TypeSpecifierNonArray::Float,
-      )],
+      vec![FunctionParameterDeclarationData::new_named("x", TypeSpecifierNonArray::Float).into()],
       vec![],
     );
   }
@@ -1396,7 +1378,7 @@ mod tests {
   // };
   #[test]
   fn declare_struct() {
-    let point = ExternalDeclaration::new_struct(
+    let point = ExternalDeclarationData::new_struct(
       "Point2D",
       vec![
         StructFieldSpecifier::new("x", TypeSpecifierNonArray::Double),
@@ -1410,7 +1392,7 @@ mod tests {
   // struct Point2D {};
   #[test]
   fn declare_bad_struct() {
-    let point = ExternalDeclaration::new_struct("Point2D", vec![]);
+    let point = ExternalDeclarationData::new_struct("Point2D", vec![]);
     assert!(point.is_none());
   }
 

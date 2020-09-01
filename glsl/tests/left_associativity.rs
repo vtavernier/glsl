@@ -1,4 +1,4 @@
-use glsl::{assert_ceq, parser::Parse, syntax, syntax::NodeContents};
+use glsl::{assert_ceq, parser::Parse, syntax};
 
 #[test]
 fn left_associativity() {
@@ -19,9 +19,9 @@ fn left_associativity() {
     let r = syntax::TranslationUnit::parse(&s);
 
     let expected = syntax::TranslationUnit::from_non_empty_iter(vec![syntax::Node {
-      contents: syntax::ExternalDeclaration::FunctionDefinition(
-        syntax::FunctionDefinition {
-          prototype: syntax::FunctionPrototype {
+      contents: syntax::ExternalDeclarationData::FunctionDefinition(
+        syntax::FunctionDefinitionData {
+          prototype: syntax::FunctionPrototypeData {
             ty: syntax::FullySpecifiedType {
               qualifier: None,
               ty: syntax::TypeSpecifier {
@@ -31,8 +31,9 @@ fn left_associativity() {
             },
             name: "main".into(),
             parameters: Vec::new(),
-          },
-          statement: syntax::CompoundStatement {
+          }
+          .into(),
+          statement: syntax::CompoundStatementData {
             statement_list: vec![syntax::Statement::Simple(Box::new(
               syntax::SimpleStatement::Expression(Some(syntax::Expr::Assignment(
                 Box::new(syntax::Expr::Variable("x".into())),
@@ -48,9 +49,10 @@ fn left_associativity() {
                 )),
               ))),
             ))],
-          },
+          }
+          .into(),
         }
-        .into_node(),
+        .into(),
       ),
       span: None,
     }])

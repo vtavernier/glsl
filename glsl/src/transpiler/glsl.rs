@@ -960,25 +960,25 @@ pub fn show_declaration<F>(f: &mut F, d: &syntax::Declaration)
 where
   F: Write,
 {
-  match *d {
-    syntax::Declaration::FunctionPrototype(ref proto) => {
+  match **d {
+    syntax::DeclarationData::FunctionPrototype(ref proto) => {
       show_function_prototype(f, &proto);
       let _ = f.write_str(";\n");
     }
-    syntax::Declaration::InitDeclaratorList(ref list) => {
+    syntax::DeclarationData::InitDeclaratorList(ref list) => {
       show_init_declarator_list(f, &list);
       let _ = f.write_str(";\n");
     }
-    syntax::Declaration::Precision(ref qual, ref ty) => {
+    syntax::DeclarationData::Precision(ref qual, ref ty) => {
       show_precision_qualifier(f, &qual);
       show_type_specifier(f, &ty);
       let _ = f.write_str(";\n");
     }
-    syntax::Declaration::Block(ref block) => {
+    syntax::DeclarationData::Block(ref block) => {
       show_block(f, &block);
       let _ = f.write_str(";\n");
     }
-    syntax::Declaration::Global(ref qual, ref identifiers) => {
+    syntax::DeclarationData::Global(ref qual, ref identifiers) => {
       show_type_qualifier(f, &qual);
 
       if !identifiers.is_empty() {
@@ -1023,8 +1023,8 @@ pub fn show_function_parameter_declaration<F>(f: &mut F, p: &syntax::FunctionPar
 where
   F: Write,
 {
-  match *p {
-    syntax::FunctionParameterDeclaration::Named(ref qual, ref fpd) => {
+  match **p {
+    syntax::FunctionParameterDeclarationData::Named(ref qual, ref fpd) => {
       if let Some(ref q) = *qual {
         show_type_qualifier(f, q);
         let _ = f.write_str(" ");
@@ -1032,7 +1032,7 @@ where
 
       show_function_parameter_declarator(f, fpd);
     }
-    syntax::FunctionParameterDeclaration::Unnamed(ref qual, ref ty) => {
+    syntax::FunctionParameterDeclarationData::Unnamed(ref qual, ref ty) => {
       if let Some(ref q) = *qual {
         show_type_qualifier(f, q);
         let _ = f.write_str(" ");
@@ -1357,21 +1357,21 @@ pub fn show_preprocessor<F>(f: &mut F, pp: &syntax::Preprocessor)
 where
   F: Write,
 {
-  match *pp {
-    syntax::Preprocessor::Define(ref pd) => show_preprocessor_define(f, pd),
-    syntax::Preprocessor::Else => show_preprocessor_else(f),
-    syntax::Preprocessor::ElseIf(ref pei) => show_preprocessor_elseif(f, pei),
-    syntax::Preprocessor::EndIf => show_preprocessor_endif(f),
-    syntax::Preprocessor::Error(ref pe) => show_preprocessor_error(f, pe),
-    syntax::Preprocessor::If(ref pi) => show_preprocessor_if(f, pi),
-    syntax::Preprocessor::IfDef(ref pid) => show_preprocessor_ifdef(f, pid),
-    syntax::Preprocessor::IfNDef(ref pind) => show_preprocessor_ifndef(f, pind),
-    syntax::Preprocessor::Include(ref pi) => show_preprocessor_include(f, pi),
-    syntax::Preprocessor::Line(ref pl) => show_preprocessor_line(f, pl),
-    syntax::Preprocessor::Pragma(ref pp) => show_preprocessor_pragma(f, pp),
-    syntax::Preprocessor::Undef(ref pu) => show_preprocessor_undef(f, pu),
-    syntax::Preprocessor::Version(ref pv) => show_preprocessor_version(f, pv),
-    syntax::Preprocessor::Extension(ref pe) => show_preprocessor_extension(f, pe),
+  match **pp {
+    syntax::PreprocessorData::Define(ref pd) => show_preprocessor_define(f, pd),
+    syntax::PreprocessorData::Else => show_preprocessor_else(f),
+    syntax::PreprocessorData::ElseIf(ref pei) => show_preprocessor_elseif(f, pei),
+    syntax::PreprocessorData::EndIf => show_preprocessor_endif(f),
+    syntax::PreprocessorData::Error(ref pe) => show_preprocessor_error(f, pe),
+    syntax::PreprocessorData::If(ref pi) => show_preprocessor_if(f, pi),
+    syntax::PreprocessorData::IfDef(ref pid) => show_preprocessor_ifdef(f, pid),
+    syntax::PreprocessorData::IfNDef(ref pind) => show_preprocessor_ifndef(f, pind),
+    syntax::PreprocessorData::Include(ref pi) => show_preprocessor_include(f, pi),
+    syntax::PreprocessorData::Line(ref pl) => show_preprocessor_line(f, pl),
+    syntax::PreprocessorData::Pragma(ref pp) => show_preprocessor_pragma(f, pp),
+    syntax::PreprocessorData::Undef(ref pu) => show_preprocessor_undef(f, pu),
+    syntax::PreprocessorData::Version(ref pv) => show_preprocessor_version(f, pv),
+    syntax::PreprocessorData::Extension(ref pe) => show_preprocessor_extension(f, pe),
   }
 }
 
@@ -1558,10 +1558,10 @@ pub fn show_external_declaration<F>(f: &mut F, ed: &syntax::ExternalDeclaration)
 where
   F: Write,
 {
-  match *ed {
-    syntax::ExternalDeclaration::Preprocessor(ref pp) => show_preprocessor(f, pp),
-    syntax::ExternalDeclaration::FunctionDefinition(ref fd) => show_function_definition(f, fd),
-    syntax::ExternalDeclaration::Declaration(ref d) => show_declaration(f, d),
+  match **ed {
+    syntax::ExternalDeclarationData::Preprocessor(ref pp) => show_preprocessor(f, pp),
+    syntax::ExternalDeclarationData::FunctionDefinition(ref fd) => show_function_definition(f, fd),
+    syntax::ExternalDeclarationData::Declaration(ref d) => show_declaration(f, d),
   }
 }
 

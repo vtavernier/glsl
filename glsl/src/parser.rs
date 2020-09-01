@@ -101,26 +101,9 @@ macro_rules! impl_parse {
       }
     }
   };
-
-  ($type_name:ty, $parser_name:ident => $field:tt) => {
-    impl Parse for $type_name {
-      fn parse_with_context<'d, 'b: 'd>(
-        source: &'b str,
-        ctx: &'d mut ParseContextData<'b>,
-      ) -> Result<Self, ParseError> {
-        let mut ctx = ParseContext::new(ctx);
-        ctx.parse(source.as_ref(), |input| {
-          run_parser(input, move |s| match $crate::parsers::$parser_name(s) {
-            Ok((i, r)) => Ok((i, (r.$field))),
-            Err(e) => Err(e),
-          })
-        })
-      }
-    }
-  };
 }
 
-impl_parse!(syntax::Identifier, identifier => contents);
+impl_parse!(syntax::Identifier, identifier);
 impl_parse!(syntax::TypeSpecifierNonArray, type_specifier_non_array);
 impl_parse!(syntax::TypeSpecifier, type_specifier);
 impl_parse!(syntax::UnaryOp, unary_op);
@@ -135,7 +118,7 @@ impl_parse!(syntax::TypeQualifierSpec, type_qualifier_spec);
 impl_parse!(syntax::FullySpecifiedType, fully_specified_type);
 impl_parse!(syntax::ArraySpecifier, array_specifier);
 impl_parse!(syntax::Expr, expr);
-impl_parse!(syntax::Declaration, declaration => contents);
+impl_parse!(syntax::Declaration, declaration);
 impl_parse!(syntax::FunctionPrototype, function_prototype);
 impl_parse!(syntax::InitDeclaratorList, init_declarator_list);
 impl_parse!(syntax::SingleDeclaration, single_declaration);
@@ -152,10 +135,10 @@ impl_parse!(syntax::JumpStatement, jump_statement);
 impl_parse!(syntax::Condition, condition);
 impl_parse!(syntax::Statement, statement);
 impl_parse!(syntax::CompoundStatement, compound_statement);
-impl_parse!(syntax::FunctionDefinition, function_definition => contents);
-impl_parse!(syntax::ExternalDeclaration, external_declaration => contents);
+impl_parse!(syntax::FunctionDefinition, function_definition);
+impl_parse!(syntax::ExternalDeclaration, external_declaration);
 impl_parse!(syntax::TranslationUnit, translation_unit);
-impl_parse!(syntax::Preprocessor, preprocessor => contents);
+impl_parse!(syntax::Preprocessor, preprocessor);
 impl_parse!(syntax::PreprocessorVersion, pp_version);
 impl_parse!(syntax::PreprocessorVersionProfile, pp_version_profile);
 impl_parse!(syntax::PreprocessorExtensionName, pp_extension_name);

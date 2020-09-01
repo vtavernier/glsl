@@ -135,8 +135,8 @@ pub fn string<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e,
 /// Parse an identifier.
 pub fn identifier<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Identifier>> {
-  parse_located!(i, { map(string, syntax::Identifier)(i) })
+) -> ParserResult<'c, 'd, 'e, syntax::Identifier> {
+  parse_located!(i, { map(string, syntax::IdentifierData)(i) })
 }
 
 /// Parse a type name.
@@ -914,23 +914,23 @@ pub fn parens_expr<'c, 'd, 'e>(
 /// Parse a dot field selection identifier.
 pub fn dot_field_selection<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Identifier>> {
+) -> ParserResult<'c, 'd, 'e, syntax::Identifier> {
   preceded(terminated(char('.'), blank), cut(identifier))(i)
 }
 
 /// Parse a declaration.
 pub fn declaration<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Declaration>> {
+) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
   parse_located!(i, {
     alt((
       map(
         terminated(function_prototype, terminated(blank, char(';'))),
-        syntax::Declaration::FunctionPrototype,
+        syntax::DeclarationData::FunctionPrototype,
       ),
       map(
         terminated(init_declarator_list, terminated(blank, char(';'))),
-        syntax::Declaration::InitDeclaratorList,
+        syntax::DeclarationData::InitDeclaratorList,
       ),
       precision_declaration,
       block_declaration,
@@ -942,7 +942,7 @@ pub fn declaration<'c, 'd, 'e>(
 /// Parse a precision declaration.
 pub fn precision_declaration<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
+) -> ParserResult<'c, 'd, 'e, syntax::DeclarationData> {
   delimited(
     terminated(keyword("precision"), blank),
     map(
@@ -950,7 +950,7 @@ pub fn precision_declaration<'c, 'd, 'e>(
         terminated(precision_qualifier, blank),
         terminated(type_specifier, blank),
       )),
-      |(qual, ty)| syntax::Declaration::Precision(qual, ty),
+      |(qual, ty)| syntax::DeclarationData::Precision(qual, ty),
     ),
     char(';'),
   )(i)
@@ -959,7 +959,7 @@ pub fn precision_declaration<'c, 'd, 'e>(
 /// Parse a block declaration.
 pub fn block_declaration<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
+) -> ParserResult<'c, 'd, 'e, syntax::DeclarationData> {
   map(
     tuple((
       terminated(type_qualifier, blank),
@@ -978,7 +978,7 @@ pub fn block_declaration<'c, 'd, 'e>(
       )),
     )),
     |(qualifier, name, fields, identifier)| {
-      syntax::Declaration::Block(syntax::Block {
+      syntax::DeclarationData::Block(syntax::Block {
         qualifier,
         name,
         fields,
@@ -991,13 +991,13 @@ pub fn block_declaration<'c, 'd, 'e>(
 /// Parse a global declaration.
 pub fn global_declaration<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Declaration> {
+) -> ParserResult<'c, 'd, 'e, syntax::DeclarationData> {
   map(
     pair(
       terminated(type_qualifier, blank),
       many0(delimited(terminated(char(','), blank), identifier, blank)),
     ),
-    |(qual, idents)| syntax::Declaration::Global(qual, idents),
+    |(qual, idents)| syntax::DeclarationData::Global(qual, idents),
   )(i)
 }
 
@@ -1096,19 +1096,23 @@ pub fn initializer_list<'c, 'd, 'e>(
 fn function_declarator<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototype> {
-  alt((
-    function_header_with_parameters,
-    map(function_header, |(ty, name)| syntax::FunctionPrototype {
-      ty,
-      name,
-      parameters: Vec::new(),
-    }),
-  ))(i)
+  parse_located!(i, {
+    alt((
+      function_header_with_parameters,
+      map(function_header, |(ty, name)| {
+        syntax::FunctionPrototypeData {
+          ty,
+          name,
+          parameters: Vec::new(),
+        }
+      }),
+    ))(i)
+  })
 }
 
 fn function_header<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, (syntax::FullySpecifiedType, syntax::Node<syntax::Identifier>)> {
+) -> ParserResult<'c, 'd, 'e, (syntax::FullySpecifiedType, syntax::Identifier)> {
   pair(
     terminated(fully_specified_type, blank),
     terminated(identifier, terminated(blank, char('('))),
@@ -1117,7 +1121,7 @@ fn function_header<'c, 'd, 'e>(
 
 fn function_header_with_parameters<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototype> {
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionPrototypeData> {
   map(
     pair(
       function_header,
@@ -1126,7 +1130,7 @@ fn function_header_with_parameters<'c, 'd, 'e>(
         preceded(blank, function_parameter_declaration),
       ),
     ),
-    |(header, parameters)| syntax::FunctionPrototype {
+    |(header, parameters)| syntax::FunctionPrototypeData {
       ty: header.0,
       name: header.1,
       parameters,
@@ -1146,22 +1150,26 @@ fn function_parameter_declaration<'c, 'd, 'e>(
 fn function_parameter_declaration_named<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclaration> {
-  map(
-    pair(
-      opt(terminated(type_qualifier, blank)),
-      function_parameter_declarator,
-    ),
-    |(ty_qual, fpd)| syntax::FunctionParameterDeclaration::Named(ty_qual, fpd),
-  )(i)
+  parse_located!(i, {
+    map(
+      pair(
+        opt(terminated(type_qualifier, blank)),
+        function_parameter_declarator,
+      ),
+      |(ty_qual, fpd)| syntax::FunctionParameterDeclarationData::Named(ty_qual, fpd),
+    )(i)
+  })
 }
 
 fn function_parameter_declaration_unnamed<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::FunctionParameterDeclaration> {
-  map(
-    pair(opt(terminated(type_qualifier, blank)), type_specifier),
-    |(ty_qual, ty_spec)| syntax::FunctionParameterDeclaration::Unnamed(ty_qual, ty_spec),
-  )(i)
+  parse_located!(i, {
+    map(
+      pair(opt(terminated(type_qualifier, blank)), type_specifier),
+      |(ty_qual, ty_spec)| syntax::FunctionParameterDeclarationData::Unnamed(ty_qual, ty_spec),
+    )(i)
+  })
 }
 
 fn function_parameter_declarator<'c, 'd, 'e>(
@@ -1512,9 +1520,7 @@ pub fn simple_statement<'c, 'd, 'e>(
     map(case_label, syntax::SimpleStatement::CaseLabel),
     map(switch_statement, syntax::SimpleStatement::Switch),
     map(selection_statement, syntax::SimpleStatement::Selection),
-    map(declaration, |d| {
-      syntax::SimpleStatement::Declaration(d.into_inner())
-    }),
+    map(declaration, |d| syntax::SimpleStatement::Declaration(d)),
     map(expr_statement, syntax::SimpleStatement::Expression),
   ))(i)
 }
@@ -1669,7 +1675,7 @@ fn iteration_statement_for_init_statement<'c, 'd, 'e>(
   alt((
     map(expr_statement, syntax::ForInitStatement::Expression),
     map(declaration, |d| {
-      syntax::ForInitStatement::Declaration(Box::new(d.into_inner()))
+      syntax::ForInitStatement::Declaration(Box::new(d))
     }),
   ))(i)
 }
@@ -1786,24 +1792,26 @@ pub fn statement<'c, 'd, 'e>(
 pub fn compound_statement<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::CompoundStatement> {
-  map(
-    delimited(
-      terminated(char('{'), blank),
-      many0(terminated(statement, blank)),
-      cut(char('}')),
-    ),
-    |statement_list| syntax::CompoundStatement { statement_list },
-  )(i)
+  parse_located!(i, {
+    map(
+      delimited(
+        terminated(char('{'), blank),
+        many0(terminated(statement, blank)),
+        cut(char('}')),
+      ),
+      |statement_list| syntax::CompoundStatementData { statement_list },
+    )(i)
+  })
 }
 
 /// Parse a function definition.
 pub fn function_definition<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::FunctionDefinition>> {
+) -> ParserResult<'c, 'd, 'e, syntax::FunctionDefinition> {
   parse_located!(i, {
     map(
       pair(terminated(function_prototype, blank), compound_statement),
-      |(prototype, statement)| syntax::FunctionDefinition {
+      |(prototype, statement)| syntax::FunctionDefinitionData {
         prototype,
         statement,
       },
@@ -1814,15 +1822,15 @@ pub fn function_definition<'c, 'd, 'e>(
 /// Parse an external declaration.
 pub fn external_declaration<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::ExternalDeclaration>> {
+) -> ParserResult<'c, 'd, 'e, syntax::ExternalDeclaration> {
   parse_located!(i, {
     alt((
-      map(preprocessor, syntax::ExternalDeclaration::Preprocessor),
+      map(preprocessor, syntax::ExternalDeclarationData::Preprocessor),
       map(
         function_definition,
-        syntax::ExternalDeclaration::FunctionDefinition,
+        syntax::ExternalDeclarationData::FunctionDefinition,
       ),
-      map(declaration, syntax::ExternalDeclaration::Declaration),
+      map(declaration, syntax::ExternalDeclarationData::Declaration),
       preceded(
         delimited(blank, char(';'), blank),
         cut(|i| external_declaration(i).map(|(i, r)| (i, r.into_inner()))),
@@ -1844,25 +1852,25 @@ pub fn translation_unit<'c, 'd, 'e>(
 /// Parse a preprocessor directive.
 pub fn preprocessor<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
-) -> ParserResult<'c, 'd, 'e, syntax::Node<syntax::Preprocessor>> {
+) -> ParserResult<'c, 'd, 'e, syntax::Preprocessor> {
   parse_located!(i, {
     preceded(
       terminated(char('#'), pp_space0),
       cut(alt((
-        map(pp_define, syntax::Preprocessor::Define),
-        value(syntax::Preprocessor::Else, pp_else),
-        map(pp_elseif, syntax::Preprocessor::ElseIf),
-        value(syntax::Preprocessor::EndIf, pp_endif),
-        map(pp_error, syntax::Preprocessor::Error),
-        map(pp_if, syntax::Preprocessor::If),
-        map(pp_ifdef, syntax::Preprocessor::IfDef),
-        map(pp_ifndef, syntax::Preprocessor::IfNDef),
-        map(pp_include, syntax::Preprocessor::Include),
-        map(pp_line, syntax::Preprocessor::Line),
-        map(pp_pragma, syntax::Preprocessor::Pragma),
-        map(pp_undef, syntax::Preprocessor::Undef),
-        map(pp_version, syntax::Preprocessor::Version),
-        map(pp_extension, syntax::Preprocessor::Extension),
+        map(pp_define, syntax::PreprocessorData::Define),
+        value(syntax::PreprocessorData::Else, pp_else),
+        map(pp_elseif, syntax::PreprocessorData::ElseIf),
+        value(syntax::PreprocessorData::EndIf, pp_endif),
+        map(pp_error, syntax::PreprocessorData::Error),
+        map(pp_if, syntax::PreprocessorData::If),
+        map(pp_ifdef, syntax::PreprocessorData::IfDef),
+        map(pp_ifndef, syntax::PreprocessorData::IfNDef),
+        map(pp_include, syntax::PreprocessorData::Include),
+        map(pp_line, syntax::PreprocessorData::Line),
+        map(pp_pragma, syntax::PreprocessorData::Pragma),
+        map(pp_undef, syntax::PreprocessorData::Undef),
+        map(pp_version, syntax::PreprocessorData::Version),
+        map(pp_extension, syntax::PreprocessorData::Extension),
       ))),
     )(i)
   })
@@ -1913,7 +1921,7 @@ pub fn pp_define<'c, 'd, 'e>(
 
 // Parse an object-like #define content.
 pub fn pp_define_object_like<'e, 'd: 'e, 'c: 'd + 'e>(
-  ident: syntax::Node<syntax::Identifier>,
+  ident: syntax::Identifier,
 ) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorDefine> {
   move |i| {
     map(preceded(pp_space0, cut(str_till_eol)), |value| {
@@ -1927,7 +1935,7 @@ pub fn pp_define_object_like<'e, 'd: 'e, 'c: 'd + 'e>(
 
 // Parse a function-like #define content.
 pub fn pp_define_function_like<'e, 'd: 'e, 'c: 'd + 'e>(
-  ident: syntax::Node<syntax::Identifier>,
+  ident: syntax::Identifier,
 ) -> impl Fn(ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, syntax::PreprocessorDefine> {
   move |i| {
     map(
@@ -1953,10 +1961,12 @@ pub fn pp_define_function_like<'e, 'd: 'e, 'c: 'd + 'e>(
 pub fn pp_else<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::Preprocessor> {
-  value(
-    syntax::Preprocessor::Else,
-    tuple((terminated(keyword("else"), pp_space0), cut(eol))),
-  )(i)
+  parse_located!(i, {
+    value(
+      syntax::PreprocessorData::Else,
+      tuple((terminated(keyword("else"), pp_space0), cut(eol))),
+    )(i)
+  })
 }
 
 /// Parse a preprocessor elseif.
@@ -1976,10 +1986,12 @@ pub fn pp_elseif<'c, 'd, 'e>(
 pub fn pp_endif<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, syntax::Preprocessor> {
-  map(
-    tuple((terminated(keyword("endif"), space0), cut(eol))),
-    |(_, _)| syntax::Preprocessor::EndIf,
-  )(i)
+  parse_located!(i, {
+    map(
+      tuple((terminated(keyword("endif"), space0), cut(eol))),
+      |(_, _)| syntax::PreprocessorData::EndIf,
+    )(i)
+  })
 }
 
 /// Parse a preprocessor error.

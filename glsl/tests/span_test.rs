@@ -1,5 +1,5 @@
 use glsl::parser::{Parse, ParseContextData};
-use glsl::syntax::{ExternalDeclaration, Node, TranslationUnit};
+use glsl::syntax::*;
 
 #[test]
 fn span_test() {
@@ -36,9 +36,9 @@ float someExtraFunction() {
   eprintln!("ast: {:#?}", tu);
 
   // Process a declaration
-  let decl_cb = |start_span: &mut glsl::syntax::NodeSpan, decl: Node<ExternalDeclaration>| {
+  let decl_cb = |start_span: &mut glsl::syntax::NodeSpan, decl: ExternalDeclaration| {
     // Look for the last comment before each declaration
-    if let ExternalDeclaration::FunctionDefinition(fndef) = &decl.contents {
+    if let ExternalDeclarationData::FunctionDefinition(fndef) = &*decl {
       let span = decl.span.as_ref().unwrap();
 
       // Find all comments in spans between the start span and the declaration span

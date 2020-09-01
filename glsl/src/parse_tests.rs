@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{assert_ceq, parsers::*, syntax, syntax::NodeContents};
+use crate::{assert_ceq, parsers::*, syntax};
 
 trait Unspan: Sized {
   type Unspanned: Sized;
@@ -2157,12 +2157,12 @@ fn parse_declaration_function_prototype() {
     ty: syntax::TypeSpecifierNonArray::Vec2,
     array_specifier: None,
   };
-  let arg0 = syntax::FunctionParameterDeclaration::Unnamed(None, arg0_ty);
+  let arg0 = syntax::FunctionParameterDeclarationData::Unnamed(None, arg0_ty);
   let qual_spec = syntax::TypeQualifierSpec::Storage(syntax::StorageQualifier::Out);
   let qual = syntax::TypeQualifier {
     qualifiers: syntax::NonEmpty(vec![qual_spec]),
   };
-  let arg1 = syntax::FunctionParameterDeclaration::Named(
+  let arg1 = syntax::FunctionParameterDeclarationData::Named(
     Some(qual),
     syntax::FunctionParameterDeclarator {
       ty: syntax::TypeSpecifier {
@@ -2172,24 +2172,24 @@ fn parse_declaration_function_prototype() {
       ident: "the_arg".into(),
     },
   );
-  let fp = syntax::FunctionPrototype {
+  let fp = syntax::FunctionPrototypeData {
     ty: rt,
     name: "foo".into(),
-    parameters: vec![arg0, arg1],
+    parameters: vec![arg0.into(), arg1.into()],
   };
-  let expected = syntax::Declaration::FunctionPrototype(fp);
+  let expected: syntax::Declaration = syntax::DeclarationData::FunctionPrototype(fp.into()).into();
 
   assert_ceq!(
     declaration("vec3 foo(vec2, out float the_arg);".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("vec3 \nfoo ( vec2\n, out float \n\tthe_arg )\n;".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("vec3 foo(vec2,out float the_arg);".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2214,19 +2214,19 @@ fn parse_declaration_init_declarator_list_single() {
     head: sd,
     tail: Vec::new(),
   };
-  let expected = syntax::Declaration::InitDeclaratorList(idl);
+  let expected: syntax::Declaration = syntax::DeclarationData::InitDeclaratorList(idl).into();
 
   assert_ceq!(
     declaration("int foo = 34;".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("int foo=34;".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("int    \t  \nfoo =\t34  ;".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2253,22 +2253,24 @@ fn parse_declaration_init_declarator_list_complex() {
       syntax::Expr::IntConst(12),
     ))),
   };
-  let expected = syntax::Declaration::InitDeclaratorList(syntax::InitDeclaratorList {
-    head: sd,
-    tail: vec![sdnt],
-  });
+  let expected: syntax::Declaration =
+    syntax::DeclarationData::InitDeclaratorList(syntax::InitDeclaratorList {
+      head: sd,
+      tail: vec![sdnt],
+    })
+    .into();
 
   assert_ceq!(
     declaration("int foo = 34, bar = 12;".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("int foo=34,bar=12;".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     declaration("int    \t  \nfoo =\t34 \n,\tbar=      12\n ;".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2279,11 +2281,11 @@ fn parse_declaration_precision_low() {
     ty: syntax::TypeSpecifierNonArray::Float,
     array_specifier: None,
   };
-  let expected = syntax::Declaration::Precision(qual, ty);
+  let expected: syntax::Declaration = syntax::DeclarationData::Precision(qual, ty).into();
 
   assert_ceq!(
     declaration("precision lowp float;".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2294,11 +2296,11 @@ fn parse_declaration_precision_medium() {
     ty: syntax::TypeSpecifierNonArray::Float,
     array_specifier: None,
   };
-  let expected = syntax::Declaration::Precision(qual, ty);
+  let expected: syntax::Declaration = syntax::DeclarationData::Precision(qual, ty).into();
 
   assert_ceq!(
     declaration("precision mediump float;".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2309,11 +2311,11 @@ fn parse_declaration_precision_high() {
     ty: syntax::TypeSpecifierNonArray::Float,
     array_specifier: None,
   };
-  let expected = syntax::Declaration::Precision(qual, ty);
+  let expected: syntax::Declaration = syntax::DeclarationData::Precision(qual, ty).into();
 
   assert_ceq!(
     declaration("precision highp float;".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2347,18 +2349,19 @@ fn parse_declaration_uniform_block() {
     },
     identifiers: syntax::NonEmpty(vec!["c".into(), "d".into()]),
   };
-  let expected = syntax::Declaration::Block(syntax::Block {
+  let expected: syntax::Declaration = syntax::DeclarationData::Block(syntax::Block {
     qualifier: qual,
     name: "UniformBlockTest".into(),
     fields: vec![f0, f1, f2],
     identifier: None,
-  });
+  })
+  .into();
 
   assert_ceq!(
     declaration("uniform UniformBlockTest { float a; vec3 b; foo c, d; };".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
-  assert_ceq!(declaration("uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;".into()).unspan(), Ok(("", expected.into_node())));
+  assert_ceq!(declaration("uniform   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;".into()).unspan(), Ok(("", expected)));
 }
 
 #[test]
@@ -2396,18 +2399,19 @@ fn parse_declaration_buffer_block() {
     },
     identifiers: syntax::NonEmpty(vec!["c".into(), "d".into()]),
   };
-  let expected = syntax::Declaration::Block(syntax::Block {
+  let expected: syntax::Declaration = syntax::DeclarationData::Block(syntax::Block {
     qualifier: qual,
     name: "UniformBlockTest".into(),
     fields: vec![f0, f1, f2],
     identifier: None,
-  });
+  })
+  .into();
 
   assert_ceq!(
     declaration("buffer UniformBlockTest { float a; vec3 b[]; foo c, d; };".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
-  assert_ceq!(declaration("buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;".into()).unspan(), Ok(("", expected.into_node())));
+  assert_ceq!(declaration("buffer   \nUniformBlockTest\n {\n \t float   a  \n; \nvec3 b   [   ]\n; foo \nc\n, \nd\n;\n }\n\t\n\t\t \t;".into()).unspan(), Ok(("", expected)));
 }
 
 #[test]
@@ -2421,9 +2425,12 @@ fn parse_selection_statement_if() {
   let st = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Jump(
     syntax::JumpStatement::Return(Some(ret)),
   )));
-  let body = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: vec![st],
-  }));
+  let body = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: vec![st],
+    }
+    .into(),
+  ));
   let rest = syntax::SelectionRestStatement::Statement(Box::new(body));
   let expected = syntax::SelectionStatement {
     cond: Box::new(cond),
@@ -2451,16 +2458,22 @@ fn parse_selection_statement_if_else() {
   let if_st = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Jump(
     syntax::JumpStatement::Return(Some(if_ret)),
   )));
-  let if_body = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: vec![if_st],
-  }));
+  let if_body = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: vec![if_st],
+    }
+    .into(),
+  ));
   let else_ret = Box::new(syntax::Expr::Variable("foo".into()));
   let else_st = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Jump(
     syntax::JumpStatement::Return(Some(else_ret)),
   )));
-  let else_body = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: vec![else_st],
-  }));
+  let else_body = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: vec![else_st],
+    }
+    .into(),
+  ));
   let rest = syntax::SelectionRestStatement::Else(Box::new(if_body), Box::new(else_body));
   let expected = syntax::SelectionStatement {
     cond: Box::new(cond),
@@ -2556,9 +2569,12 @@ fn parse_iteration_statement_while_empty() {
     Box::new(syntax::Expr::Variable("a".into())),
     Box::new(syntax::Expr::Variable("b".into())),
   )));
-  let st = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: Vec::new(),
-  }));
+  let st = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: Vec::new(),
+    }
+    .into(),
+  ));
   let expected = syntax::IterationStatement::While(cond, Box::new(st));
 
   assert_ceq!(
@@ -2577,9 +2593,12 @@ fn parse_iteration_statement_while_empty() {
 
 #[test]
 fn parse_iteration_statement_do_while_empty() {
-  let st = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: Vec::new(),
-  }));
+  let st = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: Vec::new(),
+    }
+    .into(),
+  ));
   let cond = Box::new(syntax::Expr::Binary(
     syntax::BinaryOp::GTE,
     Box::new(syntax::Expr::Variable("a".into())),
@@ -2604,7 +2623,7 @@ fn parse_iteration_statement_do_while_empty() {
 #[test]
 fn parse_iteration_statement_for_empty() {
   let init = syntax::ForInitStatement::Declaration(Box::new(
-    syntax::Declaration::InitDeclaratorList(syntax::InitDeclaratorList {
+    syntax::DeclarationData::InitDeclaratorList(syntax::InitDeclaratorList {
       head: syntax::SingleDeclaration {
         ty: syntax::FullySpecifiedType {
           qualifier: None,
@@ -2620,7 +2639,8 @@ fn parse_iteration_statement_for_empty() {
         ))),
       },
       tail: Vec::new(),
-    }),
+    })
+    .into(),
   ));
   let rest = syntax::ForRestStatement {
     condition: Some(syntax::Condition::Expr(Box::new(syntax::Expr::Binary(
@@ -2633,9 +2653,12 @@ fn parse_iteration_statement_for_empty() {
       Box::new(syntax::Expr::Variable("i".into())),
     ))),
   };
-  let st = syntax::Statement::Compound(Box::new(syntax::CompoundStatement {
-    statement_list: Vec::new(),
-  }));
+  let st = syntax::Statement::Compound(Box::new(
+    syntax::CompoundStatementData {
+      statement_list: Vec::new(),
+    }
+    .into(),
+  ));
   let expected = syntax::IterationStatement::For(init, rest, Box::new(st));
 
   assert_ceq!(
@@ -2710,9 +2733,10 @@ fn parse_simple_statement_return() {
 
 #[test]
 fn parse_compound_statement_empty() {
-  let expected = syntax::CompoundStatement {
+  let expected = syntax::CompoundStatementData {
     statement_list: Vec::new(),
-  };
+  }
+  .into();
 
   assert_ceq!(compound_statement("{}".into()).unspan(), Ok(("", expected)));
 }
@@ -2723,14 +2747,17 @@ fn parse_compound_statement() {
     syntax::SelectionStatement {
       cond: Box::new(syntax::Expr::BoolConst(true)),
       rest: syntax::SelectionRestStatement::Statement(Box::new(syntax::Statement::Compound(
-        Box::new(syntax::CompoundStatement {
-          statement_list: Vec::new(),
-        }),
+        Box::new(
+          syntax::CompoundStatementData {
+            statement_list: Vec::new(),
+          }
+          .into(),
+        ),
       ))),
     },
   )));
   let st1 = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Declaration(
-    syntax::Declaration::InitDeclaratorList(syntax::InitDeclaratorList {
+    syntax::DeclarationData::InitDeclaratorList(syntax::InitDeclaratorList {
       head: syntax::SingleDeclaration {
         ty: syntax::FullySpecifiedType {
           qualifier: None,
@@ -2744,14 +2771,16 @@ fn parse_compound_statement() {
         initializer: None,
       },
       tail: Vec::new(),
-    }),
+    })
+    .into(),
   )));
   let st2 = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Jump(
     syntax::JumpStatement::Return(Some(Box::new(syntax::Expr::IntConst(42)))),
   )));
-  let expected = syntax::CompoundStatement {
+  let expected: syntax::CompoundStatement = syntax::CompoundStatementData {
     statement_list: vec![st0, st1, st2],
-  };
+  }
+  .into();
 
   assert_ceq!(
     compound_statement("{ if (true) {} isampler3D x; return 42 ; }".into()).unspan(),
@@ -2772,32 +2801,35 @@ fn parse_function_definition() {
       array_specifier: None,
     },
   };
-  let fp = syntax::FunctionPrototype {
+  let fp = syntax::FunctionPrototypeData {
     ty: rt,
     name: "foo".into(),
     parameters: Vec::new(),
-  };
+  }
+  .into();
   let st0 = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Jump(
     syntax::JumpStatement::Return(Some(Box::new(syntax::Expr::Variable("bar".into())))),
   )));
-  let expected = syntax::FunctionDefinition {
+  let expected: syntax::FunctionDefinition = syntax::FunctionDefinitionData {
     prototype: fp,
-    statement: syntax::CompoundStatement {
+    statement: syntax::CompoundStatementData {
       statement_list: vec![st0],
-    },
-  };
+    }
+    .into(),
+  }
+  .into();
 
   assert_ceq!(
     function_definition("iimage2DArray foo() { return bar; }".into()).unspan(),
-    Ok(("", expected.clone().into_node())),
+    Ok(("", expected.clone())),
   );
   assert_ceq!(
     function_definition("iimage2DArray \tfoo\n()\n \n{\n return \nbar\n;}".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
   assert_ceq!(
     function_definition("iimage2DArray foo(){return bar;}".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -2805,9 +2837,9 @@ fn parse_function_definition() {
 fn parse_buffer_block_0() {
   let src = include_str!("../data/tests/buffer_block_0.glsl");
   let main_fn = syntax::Node {
-    contents: syntax::ExternalDeclaration::FunctionDefinition(
-      syntax::FunctionDefinition {
-        prototype: syntax::FunctionPrototype {
+    contents: syntax::ExternalDeclarationData::FunctionDefinition(
+      syntax::FunctionDefinitionData {
+        prototype: syntax::FunctionPrototypeData {
           ty: syntax::FullySpecifiedType {
             qualifier: None,
             ty: syntax::TypeSpecifier {
@@ -2817,19 +2849,21 @@ fn parse_buffer_block_0() {
           },
           name: "main".into(),
           parameters: Vec::new(),
-        },
-        statement: syntax::CompoundStatement {
+        }
+        .into(),
+        statement: syntax::CompoundStatementData {
           statement_list: Vec::new(),
-        },
+        }
+        .into(),
       }
-      .into_node(),
+      .into(),
     ),
     span: None,
   };
 
   let buffer_block = syntax::Node {
-    contents: syntax::ExternalDeclaration::Declaration(
-      syntax::Declaration::Block(syntax::Block {
+    contents: syntax::ExternalDeclarationData::Declaration(
+      syntax::DeclarationData::Block(syntax::Block {
         qualifier: syntax::TypeQualifier {
           qualifiers: syntax::NonEmpty(vec![syntax::TypeQualifierSpec::Storage(
             syntax::StorageQualifier::Buffer,
@@ -2851,7 +2885,7 @@ fn parse_buffer_block_0() {
         }],
         identifier: Some("main_tiles".into()),
       })
-      .into_node(),
+      .into(),
     ),
     span: None,
   };
@@ -2883,8 +2917,8 @@ fn parse_layout_buffer_block_0() {
     ]),
   };
   let block = syntax::Node {
-    contents: syntax::ExternalDeclaration::Declaration(
-      syntax::Declaration::Block(syntax::Block {
+    contents: syntax::ExternalDeclarationData::Declaration(
+      syntax::DeclarationData::Block(syntax::Block {
         qualifier: type_qual,
         name: "Foo".into(),
         fields: vec![syntax::StructFieldSpecifier {
@@ -2897,7 +2931,7 @@ fn parse_layout_buffer_block_0() {
         }],
         identifier: Some("foo".into()),
       })
-      .into_node(),
+      .into(),
     ),
     span: None,
   };
@@ -2943,11 +2977,11 @@ fn parse_pp_version() {
     preprocessor("#version 450\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Version(syntax::PreprocessorVersion {
+      syntax::PreprocessorData::Version(syntax::PreprocessorVersion {
         version: 450,
         profile: None,
       })
-      .into_node()
+      .into()
     ))
   );
 
@@ -2955,11 +2989,11 @@ fn parse_pp_version() {
     preprocessor("#version 450 core\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Version(syntax::PreprocessorVersion {
+      syntax::PreprocessorData::Version(syntax::PreprocessorVersion {
         version: 450,
         profile: Some(syntax::PreprocessorVersionProfile::Core)
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -2970,11 +3004,11 @@ fn parse_pp_version_newline() {
     preprocessor("#version 450\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Version(syntax::PreprocessorVersion {
+      syntax::PreprocessorData::Version(syntax::PreprocessorVersion {
         version: 450,
         profile: None,
       })
-      .into_node()
+      .into()
     ))
   );
 
@@ -2982,11 +3016,11 @@ fn parse_pp_version_newline() {
     preprocessor("#version 450 core\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Version(syntax::PreprocessorVersion {
+      syntax::PreprocessorData::Version(syntax::PreprocessorVersion {
         version: 450,
         profile: Some(syntax::PreprocessorVersionProfile::Core)
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -2996,11 +3030,11 @@ fn parse_pp_define() {
   let expect = |v: &str| {
     Ok((
       "",
-      syntax::Preprocessor::Define(syntax::PreprocessorDefine::ObjectLike {
+      syntax::PreprocessorData::Define(syntax::PreprocessorDefine::ObjectLike {
         ident: "test".into(),
         value: v.to_owned(),
       })
-      .into_node(),
+      .into(),
     ))
   };
 
@@ -3021,11 +3055,11 @@ fn parse_pp_define() {
     preprocessor("#define test123 .0f\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Define(syntax::PreprocessorDefine::ObjectLike {
+      syntax::PreprocessorData::Define(syntax::PreprocessorDefine::ObjectLike {
         ident: "test123".into(),
         value: ".0f".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 
@@ -3033,34 +3067,36 @@ fn parse_pp_define() {
     preprocessor("#define test 1\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Define(syntax::PreprocessorDefine::ObjectLike {
+      syntax::PreprocessorData::Define(syntax::PreprocessorDefine::ObjectLike {
         ident: "test".into(),
         value: "1".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 }
 
 #[test]
 fn parse_pp_define_with_args() {
-  let expected = syntax::Preprocessor::Define(syntax::PreprocessorDefine::FunctionLike {
-    ident: "add".into(),
-    args: vec![
-      syntax::Identifier::new("x").unwrap().into_node(),
-      syntax::Identifier::new("y").unwrap().into_node(),
-    ],
-    value: "(x + y)".to_owned(),
-  });
+  let expected: syntax::Preprocessor =
+    syntax::PreprocessorData::Define(syntax::PreprocessorDefine::FunctionLike {
+      ident: "add".into(),
+      args: vec![
+        syntax::IdentifierData::new("x").unwrap().into(),
+        syntax::IdentifierData::new("y").unwrap().into(),
+      ],
+      value: "(x + y)".to_owned(),
+    })
+    .into();
 
   assert_ceq!(
     preprocessor("#define \\\n add(x, y) \\\n (x + y)".into()).unspan(),
-    Ok(("", expected.clone().into_node()))
+    Ok(("", expected.clone()))
   );
 
   assert_ceq!(
     preprocessor("#define \\\n add(  x, y  ) \\\n (x + y)".into()).unspan(),
-    Ok(("", expected.into_node()))
+    Ok(("", expected))
   );
 }
 
@@ -3075,11 +3111,11 @@ fn parse_pp_define_multiline() {
     .unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Define(syntax::PreprocessorDefine::ObjectLike {
+      syntax::PreprocessorData::Define(syntax::PreprocessorDefine::ObjectLike {
         ident: "foo".into(),
         value: "32".to_owned(),
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3088,7 +3124,7 @@ fn parse_pp_define_multiline() {
 fn parse_pp_else() {
   assert_ceq!(
     preprocessor("#    else\n".into()).unspan(),
-    Ok(("", syntax::Preprocessor::Else.into_node()))
+    Ok(("", syntax::PreprocessorData::Else.into()))
   );
 }
 
@@ -3098,10 +3134,10 @@ fn parse_pp_elseif() {
     preprocessor("#   elseif \\\n42\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::ElseIf(syntax::PreprocessorElseIf {
+      syntax::PreprocessorData::ElseIf(syntax::PreprocessorElseIf {
         condition: "42".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3110,7 +3146,7 @@ fn parse_pp_elseif() {
 fn parse_pp_endif() {
   assert_ceq!(
     preprocessor("#\\\nendif".into()).unspan(),
-    Ok(("", syntax::Preprocessor::EndIf.into_node()))
+    Ok(("", syntax::PreprocessorData::EndIf.into()))
   );
 }
 
@@ -3120,10 +3156,10 @@ fn parse_pp_error() {
     preprocessor("#error \\\n     some message".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Error(syntax::PreprocessorError {
+      syntax::PreprocessorData::Error(syntax::PreprocessorError {
         message: "some message".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3134,10 +3170,10 @@ fn parse_pp_if() {
     preprocessor("# \\\nif 42".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::If(syntax::PreprocessorIf {
+      syntax::PreprocessorData::If(syntax::PreprocessorIf {
         condition: "42".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3148,10 +3184,10 @@ fn parse_pp_ifdef() {
     preprocessor("#ifdef       FOO\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::IfDef(syntax::PreprocessorIfDef {
-        ident: syntax::Identifier("FOO".to_owned()).into_node()
+      syntax::PreprocessorData::IfDef(syntax::PreprocessorIfDef {
+        ident: syntax::IdentifierData("FOO".to_owned()).into()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3162,10 +3198,10 @@ fn parse_pp_ifndef() {
     preprocessor("#\\\nifndef \\\n   FOO\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::IfNDef(syntax::PreprocessorIfNDef {
-        ident: syntax::Identifier("FOO".to_owned()).into_node()
+      syntax::PreprocessorData::IfNDef(syntax::PreprocessorIfNDef {
+        ident: syntax::IdentifierData("FOO".to_owned()).into()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3176,10 +3212,10 @@ fn parse_pp_include() {
     preprocessor("#include <filename>\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Include(syntax::PreprocessorInclude {
+      syntax::PreprocessorData::Include(syntax::PreprocessorInclude {
         path: syntax::Path::Absolute("filename".to_owned())
       })
-      .into_node()
+      .into()
     ))
   );
 
@@ -3187,10 +3223,10 @@ fn parse_pp_include() {
     preprocessor("#include \\\n\"filename\"\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Include(syntax::PreprocessorInclude {
+      syntax::PreprocessorData::Include(syntax::PreprocessorInclude {
         path: syntax::Path::Relative("filename".to_owned())
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3201,11 +3237,11 @@ fn parse_pp_line() {
     preprocessor("#   line \\\n2\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Line(syntax::PreprocessorLine {
+      syntax::PreprocessorData::Line(syntax::PreprocessorLine {
         line: 2,
         source_string_number: None,
       })
-      .into_node()
+      .into()
     ))
   );
 
@@ -3213,11 +3249,11 @@ fn parse_pp_line() {
     preprocessor("#line 2 \\\n 4\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Line(syntax::PreprocessorLine {
+      syntax::PreprocessorData::Line(syntax::PreprocessorLine {
         line: 2,
         source_string_number: Some(4),
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3228,10 +3264,10 @@ fn parse_pp_pragma() {
     preprocessor("#\\\npragma  some   flag".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Pragma(syntax::PreprocessorPragma {
+      syntax::PreprocessorData::Pragma(syntax::PreprocessorPragma {
         command: "some   flag".to_owned()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3242,10 +3278,10 @@ fn parse_pp_undef() {
     preprocessor("# undef \\\n FOO".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Undef(syntax::PreprocessorUndef {
-        name: syntax::Identifier("FOO".to_owned()).into_node()
+      syntax::PreprocessorData::Undef(syntax::PreprocessorUndef {
+        name: syntax::IdentifierData("FOO".to_owned()).into()
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3291,11 +3327,11 @@ fn parse_pp_extension() {
     preprocessor("#extension all: require\n".into()).unspan(),
     Ok((
       "",
-      syntax::Preprocessor::Extension(syntax::PreprocessorExtension {
+      syntax::PreprocessorData::Extension(syntax::PreprocessorExtension {
         name: syntax::PreprocessorExtensionName::All,
         behavior: Some(syntax::PreprocessorExtensionBehavior::Require)
       })
-      .into_node()
+      .into()
     ))
   );
 }
@@ -3350,10 +3386,11 @@ fn parse_dot_field_expr_statement() {
     initializer: Some(ini),
   };
   let expected = syntax::Statement::Simple(Box::new(syntax::SimpleStatement::Declaration(
-    syntax::Declaration::InitDeclaratorList(syntax::InitDeclaratorList {
+    syntax::DeclarationData::InitDeclaratorList(syntax::InitDeclaratorList {
       head: sd,
       tail: Vec::new(),
-    }),
+    })
+    .into(),
   )));
 
   assert_ceq!(statement(src.into()).unspan(), Ok(("", expected)));

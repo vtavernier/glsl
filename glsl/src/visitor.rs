@@ -13,7 +13,7 @@
 //! For instance, we can imagine visiting an AST to count how many variables are declared:
 //!
 //! ```
-//! use glsl::syntax::{CompoundStatement, Expr, SingleDeclaration, Statement, TypeSpecifierNonArray};
+//! use glsl::syntax::{CompoundStatement, CompoundStatementData, Expr, SingleDeclaration, Statement, TypeSpecifierNonArray};
 //! use glsl::visitor::{Host, Visit, Visitor};
 //! use std::iter::FromIterator;
 //!
@@ -38,7 +38,7 @@
 //!   None
 //! );
 //!
-//! let mut compound = CompoundStatement::from_iter(vec![decl0, decl1, decl2]);
+//! let mut compound: CompoundStatement = CompoundStatementData::from_iter(vec![decl0, decl1, decl2]).into();
 //!
 //! // our visitor that will count the number of variables it saw
 //! struct Counter {
@@ -435,10 +435,10 @@ impl Host for syntax::ExternalDeclaration {
     let visit = visitor.visit_external_declaration(self);
 
     if visit == Visit::Children {
-      match *self {
-        syntax::ExternalDeclaration::Preprocessor(ref mut p) => p.visit(visitor),
-        syntax::ExternalDeclaration::FunctionDefinition(ref mut fd) => fd.visit(visitor),
-        syntax::ExternalDeclaration::Declaration(ref mut d) => d.visit(visitor),
+      match **self {
+        syntax::ExternalDeclarationData::Preprocessor(ref mut p) => p.visit(visitor),
+        syntax::ExternalDeclarationData::FunctionDefinition(ref mut fd) => fd.visit(visitor),
+        syntax::ExternalDeclarationData::Declaration(ref mut d) => d.visit(visitor),
       }
     }
   }
@@ -452,21 +452,21 @@ impl Host for syntax::Preprocessor {
     let visit = visitor.visit_preprocessor(self);
 
     if visit == Visit::Children {
-      match *self {
-        syntax::Preprocessor::Define(ref mut pd) => pd.visit(visitor),
-        syntax::Preprocessor::Else => (),
-        syntax::Preprocessor::ElseIf(ref mut pei) => pei.visit(visitor),
-        syntax::Preprocessor::EndIf => (),
-        syntax::Preprocessor::Error(ref mut pe) => pe.visit(visitor),
-        syntax::Preprocessor::If(ref mut pi) => pi.visit(visitor),
-        syntax::Preprocessor::IfDef(ref mut pid) => pid.visit(visitor),
-        syntax::Preprocessor::IfNDef(ref mut pind) => pind.visit(visitor),
-        syntax::Preprocessor::Include(ref mut pi) => pi.visit(visitor),
-        syntax::Preprocessor::Line(ref mut pl) => pl.visit(visitor),
-        syntax::Preprocessor::Pragma(ref mut pp) => pp.visit(visitor),
-        syntax::Preprocessor::Undef(ref mut pu) => pu.visit(visitor),
-        syntax::Preprocessor::Version(ref mut pv) => pv.visit(visitor),
-        syntax::Preprocessor::Extension(ref mut ext) => ext.visit(visitor),
+      match **self {
+        syntax::PreprocessorData::Define(ref mut pd) => pd.visit(visitor),
+        syntax::PreprocessorData::Else => (),
+        syntax::PreprocessorData::ElseIf(ref mut pei) => pei.visit(visitor),
+        syntax::PreprocessorData::EndIf => (),
+        syntax::PreprocessorData::Error(ref mut pe) => pe.visit(visitor),
+        syntax::PreprocessorData::If(ref mut pi) => pi.visit(visitor),
+        syntax::PreprocessorData::IfDef(ref mut pid) => pid.visit(visitor),
+        syntax::PreprocessorData::IfNDef(ref mut pind) => pind.visit(visitor),
+        syntax::PreprocessorData::Include(ref mut pi) => pi.visit(visitor),
+        syntax::PreprocessorData::Line(ref mut pl) => pl.visit(visitor),
+        syntax::PreprocessorData::Pragma(ref mut pp) => pp.visit(visitor),
+        syntax::PreprocessorData::Undef(ref mut pu) => pu.visit(visitor),
+        syntax::PreprocessorData::Version(ref mut pv) => pv.visit(visitor),
+        syntax::PreprocessorData::Extension(ref mut ext) => ext.visit(visitor),
       }
     }
   }
@@ -674,13 +674,13 @@ impl Host for syntax::FunctionParameterDeclaration {
     let visit = visitor.visit_function_parameter_declaration(self);
 
     if visit == Visit::Children {
-      match *self {
-        syntax::FunctionParameterDeclaration::Named(ref mut tq, ref mut fpd) => {
+      match **self {
+        syntax::FunctionParameterDeclarationData::Named(ref mut tq, ref mut fpd) => {
           tq.visit(visitor);
           fpd.visit(visitor);
         }
 
-        syntax::FunctionParameterDeclaration::Unnamed(ref mut tq, ref mut ty) => {
+        syntax::FunctionParameterDeclarationData::Unnamed(ref mut tq, ref mut ty) => {
           tq.visit(visitor);
           ty.visit(visitor);
         }
@@ -725,19 +725,19 @@ impl Host for syntax::Declaration {
     let visit = visitor.visit_declaration(self);
 
     if visit == Visit::Children {
-      match *self {
-        syntax::Declaration::FunctionPrototype(ref mut fp) => fp.visit(visitor),
+      match **self {
+        syntax::DeclarationData::FunctionPrototype(ref mut fp) => fp.visit(visitor),
 
-        syntax::Declaration::InitDeclaratorList(ref mut idl) => idl.visit(visitor),
+        syntax::DeclarationData::InitDeclaratorList(ref mut idl) => idl.visit(visitor),
 
-        syntax::Declaration::Precision(ref mut pq, ref mut ty) => {
+        syntax::DeclarationData::Precision(ref mut pq, ref mut ty) => {
           pq.visit(visitor);
           ty.visit(visitor);
         }
 
-        syntax::Declaration::Block(ref mut block) => block.visit(visitor),
+        syntax::DeclarationData::Block(ref mut block) => block.visit(visitor),
 
-        syntax::Declaration::Global(ref mut tq, ref mut idents) => {
+        syntax::DeclarationData::Global(ref mut tq, ref mut idents) => {
           tq.visit(visitor);
 
           for ident in idents {
@@ -1426,7 +1426,8 @@ mod tests {
     let decl2 =
       syntax::Statement::declare_var(syntax::TypeSpecifierNonArray::Vec4, "z", None, None);
 
-    let mut compound = syntax::CompoundStatement::from_iter(vec![decl0, decl1, decl2]);
+    let mut compound: syntax::CompoundStatement =
+      syntax::CompoundStatementData::from_iter(vec![decl0, decl1, decl2]).into();
 
     // our visitor that will count the number of variables it saw
     struct Counter {

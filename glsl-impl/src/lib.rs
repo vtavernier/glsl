@@ -126,12 +126,43 @@ pub fn node_contents(input: TokenStream) -> TokenStream {
 
   // Build the output, possibly using quasi-quotation
   let expanded = quote! {
+    #[automatically_derived]
     impl NodeContents for #struct_name {}
+    #[automatically_derived]
     impl NodeContentsEq for #struct_name {
       fn contents_eq(&self, other: &Self) -> bool {
         #contents_eq_body
       }
     }
+  };
+
+  // Is this a "Data" node?
+  let raw_name = base_ident
+    .to_string()
+    .strip_suffix("Data")
+    .map(|id| format_ident!("{}", id));
+  let expanded = if let Some(raw_name) = raw_name {
+    let lifetimes: Vec<_> = input.generics.lifetimes().collect();
+    let type_name = if lifetimes.is_empty() {
+      quote! { #raw_name }
+    } else {
+      quote! { #raw_name<#(#lifetimes),*> }
+    };
+
+    quote! {
+      #expanded
+
+      pub type #type_name = Node<#struct_name>;
+
+      impl<U> From<U> for #type_name
+        where U: Into<#base_ident> {
+          fn from(u: U) -> Self {
+            Node::new(u.into(), None)
+          }
+      }
+    }
+  } else {
+    expanded
   };
 
   TokenStream::from(expanded)

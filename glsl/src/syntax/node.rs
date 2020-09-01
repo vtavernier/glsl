@@ -89,11 +89,7 @@ impl std::cmp::PartialOrd for NodeSpan {
   }
 }
 
-pub trait NodeContents: fmt::Debug + Clone + PartialEq + Sized {
-  fn into_node(self) -> Node<Self> {
-    Node::new(self, None)
-  }
-}
+pub trait NodeContents: fmt::Debug + Clone + PartialEq + Sized {}
 
 /// A syntax node with span information
 #[derive(Debug, Clone, PartialEq)]
