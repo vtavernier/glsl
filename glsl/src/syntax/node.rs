@@ -3,7 +3,7 @@ use std::fmt;
 use crate::parsers::ParseInput;
 
 /// Span information for a node, constructed from a nom_locate::LocatedSpan
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, Hash)]
 pub struct NodeSpan {
   /// The index of this span into the list of parsed units. This is used to
   /// identify which source string this span refers to when combining multiple ASTs
