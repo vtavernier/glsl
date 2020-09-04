@@ -54,7 +54,7 @@ where
             errors: err
               .errors
               .into_iter()
-              .map(|(i, k)| (i.fragment(), k))
+              .map(|(i, k)| (*i.fragment(), k))
               .collect(),
           },
         );

@@ -47,7 +47,7 @@ macro_rules! parse_located {
         res,
         Some(
           (
-            s.context().map(ParseContext::current_source).unwrap_or(0),
+            s.extra.map(ParseContext::current_source).unwrap_or(0),
             s.slice(0..(end.location_offset() - start.location_offset())),
           )
             .into(),
@@ -92,7 +92,7 @@ pub fn comment<'c, 'd, 'e>(
     )(i)
   })?;
 
-  i.context().map(|c| c.add_comment(res.clone()));
+  i.extra.map(|c| c.add_comment(res.clone()));
   Ok((i, res.into_inner()))
 }
 
@@ -159,7 +159,7 @@ pub fn type_specifier_non_struct<'c, 'd, 'e>(
 ) -> ParserResult<'c, 'd, 'e, syntax::TypeSpecifierNonArray> {
   let (i1, t) = identifier_str(i)?;
 
-  match t.fragment() {
+  match *t.fragment() {
     "void" => Ok((i1, syntax::TypeSpecifierNonArray::Void)),
     "bool" => Ok((i1, syntax::TypeSpecifierNonArray::Bool)),
     "int" => Ok((i1, syntax::TypeSpecifierNonArray::Int)),
