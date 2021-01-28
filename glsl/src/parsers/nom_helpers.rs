@@ -2,10 +2,11 @@
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::{anychar, multispace1, newline};
+use nom::character::complete::{anychar, line_ending, multispace1};
 use nom::combinator::{map, recognize, value};
 use nom::error::{ErrorKind, VerboseError, VerboseErrorKind};
 use nom::multi::fold_many0;
+use nom::sequence::preceded;
 use nom::{Err as NomErr, IResult};
 
 use nom::{AsBytes, InputLength, Slice};
@@ -48,7 +49,7 @@ pub fn eoi<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()
 pub fn eol<'c, 'd, 'e>(i: ParseInput<'c, 'd, 'e>) -> ParserResult<'c, 'd, 'e, ()> {
   alt((
     eoi, // this one goes first because it’s very cheap
-    value((), newline),
+    value((), line_ending),
   ))(i)
 }
 
@@ -94,7 +95,13 @@ pub fn str_till_eol<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
   map(
-    recognize(till(alt((value((), tag("\\\n")), value((), anychar))), eol)),
+    recognize(till(
+      alt((
+        value((), preceded(tag("\\"), line_ending)),
+        value((), anychar),
+      )),
+      eol,
+    )),
     |i| {
       if i.as_bytes().last() == Some(&b'\n') {
         i.slice(0..i.input_len() - 1)
@@ -113,5 +120,5 @@ pub fn str_till_eol<'c, 'd, 'e>(
 pub fn blank_space<'c, 'd, 'e>(
   i: ParseInput<'c, 'd, 'e>,
 ) -> ParserResult<'c, 'd, 'e, ParseInput<'c, 'd, 'e>> {
-  recognize(many0_(alt((multispace1, tag("\\\n")))))(i)
+  recognize(many0_(alt((multispace1, preceded(tag("\\"), line_ending)))))(i)
 }
